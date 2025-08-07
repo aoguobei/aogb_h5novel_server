@@ -17,7 +17,7 @@ import (
 func GetBrands(c *gin.Context) {
 	var brands []models.Brand
 
-	result := database.DB.Find(&brands)
+	result := database.DB.Preload("Clients").Find(&brands)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
 		return

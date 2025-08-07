@@ -80,6 +80,9 @@ func SetupRoutes() *gin.Engine {
 
 		// 网站创建路由
 		api.POST("/create-website", handlers.CreateWebsite)
+
+		// 网站配置查询路由
+		api.GET("/website-config/:clientId", handlers.GetWebsiteConfig)
 	}
 
 	return r

@@ -7,12 +7,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"brand-config-api/database"
 	"brand-config-api/models"
 
+	"errors"
+
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // CreateWebsiteRequest 创建网站的请求结构
@@ -860,4 +864,82 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(dstFile, srcFile)
 	return err
+}
+
+// GetWebsiteConfig 获取网站配置
+func GetWebsiteConfig(c *gin.Context) {
+	clientID := c.Param("clientId")
+	if clientID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Client ID is required"})
+		return
+	}
+
+	// 解析clientID为整数
+	clientIDInt, err := strconv.Atoi(clientID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid client ID"})
+		return
+	}
+
+	// 查询Client信息
+	var client models.Client
+	if err := database.DB.Preload("Brand").First(&client, clientIDInt).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Client not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch client"})
+		}
+		return
+	}
+
+	// 查询BaseConfig
+	var baseConfig models.BaseConfig
+	if err := database.DB.Where("client_id = ?", clientIDInt).First(&baseConfig).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch base config"})
+		return
+	}
+
+	// 查询CommonConfig
+	var commonConfig models.CommonConfig
+	if err := database.DB.Where("client_id = ?", clientIDInt).First(&commonConfig).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch common config"})
+		return
+	}
+
+	// 查询PayConfig
+	var payConfig models.PayConfig
+	if err := database.DB.Where("client_id = ?", clientIDInt).First(&payConfig).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch pay config"})
+		return
+	}
+
+	// 查询UIConfig
+	var uiConfig models.UIConfig
+	if err := database.DB.Where("client_id = ?", clientIDInt).First(&uiConfig).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch UI config"})
+		return
+	}
+
+	// 构建响应数据
+	response := gin.H{
+		"client": gin.H{
+			"id":         client.ID,
+			"host":       client.Host,
+			"created_at": client.CreatedAt,
+			"updated_at": client.UpdatedAt,
+			"brand": gin.H{
+				"id":   client.Brand.ID,
+				"code": client.Brand.Code,
+			},
+		},
+		"base_config":   baseConfig,
+		"common_config": commonConfig,
+		"pay_config":    payConfig,
+		"ui_config":     uiConfig,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Website config retrieved successfully",
+		"data":    response,
+	})
 }
