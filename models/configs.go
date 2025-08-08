@@ -83,3 +83,16 @@ type UIConfig struct {
 	// 关联关系
 	Client Client `json:"client" gorm:"foreignKey:ClientID"`
 }
+
+// NovelConfig 小说配置模型
+type NovelConfig struct {
+	ID                    int       `json:"id" gorm:"primaryKey"`
+	ClientID              int       `json:"client_id" gorm:"not null;uniqueIndex"` // 关联的客户端ID，唯一约束
+	TTJumpHomeUrl         string    `json:"tt_jump_home_url" gorm:"type:varchar(500)"`
+	TTLoginCallbackDomain string    `json:"tt_login_callback_domain" gorm:"type:varchar(200)"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+
+	// 关联关系
+	Client Client `json:"client" gorm:"foreignKey:ClientID"`
+}

@@ -29,6 +29,7 @@ type ServerConfig struct {
 
 // FileConfig 文件操作配置
 type FileConfig struct {
+	BasePath       string // 基础路径，如 C:/F_explorer/h5projects/jianruiH5/novel_h5config
 	ProjectRoot    string
 	ConfigDir      string
 	PrebuildDir    string
@@ -37,10 +38,19 @@ type FileConfig struct {
 	IndexFile      string
 	ViteConfigFile string
 	PackageFile    string
+	// 新增配置目录
+	BaseConfigsDir   string
+	CommonConfigsDir string
+	PayConfigsDir    string
+	UIConfigsDir     string
+	LocalConfigsDir  string
+	NovelConfigFile  string
 }
 
 // Load 加载配置
 func Load() *Config {
+	basePath := getEnv("BASE_PATH", "C:/F_explorer/h5projects/jianruiH5/novel_h5config")
+
 	return &Config{
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
@@ -54,14 +64,22 @@ func Load() *Config {
 			Mode: getEnv("GIN_MODE", "debug"),
 		},
 		File: FileConfig{
-			ProjectRoot:    "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel",
-			ConfigDir:      "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig",
-			PrebuildDir:    "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/prebuild/build",
-			StaticDir:      "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/static",
-			HostFile:       "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig/_host.js",
-			IndexFile:      "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig/index.js",
-			ViteConfigFile: "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/vite.config.js",
-			PackageFile:    "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/package.json",
+			BasePath:       basePath,
+			ProjectRoot:    filepath.Join(basePath, "funNovel"),
+			ConfigDir:      filepath.Join(basePath, "funNovel/src/appConfig"),
+			PrebuildDir:    filepath.Join(basePath, "funNovel/prebuild/build"),
+			StaticDir:      filepath.Join(basePath, "funNovel/src/static"),
+			HostFile:       filepath.Join(basePath, "funNovel/src/appConfig/_host.js"),
+			IndexFile:      filepath.Join(basePath, "funNovel/src/appConfig/index.js"),
+			ViteConfigFile: filepath.Join(basePath, "funNovel/vite.config.js"),
+			PackageFile:    filepath.Join(basePath, "funNovel/package.json"),
+			// 新增配置目录
+			BaseConfigsDir:   filepath.Join(basePath, "funNovel/src/appConfig/baseConfigs"),
+			CommonConfigsDir: filepath.Join(basePath, "funNovel/src/appConfig/commonConfigs"),
+			PayConfigsDir:    filepath.Join(basePath, "funNovel/src/appConfig/payConfigs"),
+			UIConfigsDir:     filepath.Join(basePath, "funNovel/src/appConfig/uiConfigs"),
+			LocalConfigsDir:  filepath.Join(basePath, "funNovel/src/appConfig/localConfigs"),
+			NovelConfigFile:  filepath.Join(basePath, "funNovel/src/appConfig/localConfigs"),
 		},
 	}
 }

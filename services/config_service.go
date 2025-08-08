@@ -117,6 +117,28 @@ func (s *ConfigService) DeleteUIConfig(id int) error {
 	return s.db.Delete(&models.UIConfig{}, id).Error
 }
 
+// GetNovelConfigs 获取所有小说配置
+func (s *ConfigService) GetNovelConfigs() ([]models.NovelConfig, error) {
+	var configs []models.NovelConfig
+	err := s.db.Preload("Client.Brand").Find(&configs).Error
+	return configs, err
+}
+
+// CreateNovelConfig 创建小说配置
+func (s *ConfigService) CreateNovelConfig(config *models.NovelConfig) error {
+	return s.db.Create(config).Error
+}
+
+// UpdateNovelConfig 更新小说配置
+func (s *ConfigService) UpdateNovelConfig(id int, config *models.NovelConfig) error {
+	return s.db.Model(&models.NovelConfig{}).Where("id = ?", id).Updates(config).Error
+}
+
+// DeleteNovelConfig 删除小说配置
+func (s *ConfigService) DeleteNovelConfig(id int) error {
+	return s.db.Delete(&models.NovelConfig{}, id).Error
+}
+
 // GetWebsiteConfig 获取网站完整配置
 func (s *ConfigService) GetWebsiteConfig(clientID int) (map[string]interface{}, error) {
 	// 查询Client信息
@@ -141,6 +163,10 @@ func (s *ConfigService) GetWebsiteConfig(clientID int) (map[string]interface{}, 
 	var uiConfig models.UIConfig
 	s.db.Where("client_id = ?", clientID).First(&uiConfig)
 
+	// 查询NovelConfig
+	var novelConfig models.NovelConfig
+	s.db.Where("client_id = ?", clientID).First(&novelConfig)
+
 	// 构建响应数据
 	response := map[string]interface{}{
 		"client": map[string]interface{}{
@@ -157,6 +183,7 @@ func (s *ConfigService) GetWebsiteConfig(clientID int) (map[string]interface{}, 
 		"common_config": commonConfig,
 		"pay_config":    payConfig,
 		"ui_config":     uiConfig,
+		"novel_config":  novelConfig,
 	}
 
 	return response, nil

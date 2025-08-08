@@ -44,6 +44,7 @@ func InitDB() {
 		&models.CommonConfig{},
 		&models.PayConfig{},
 		&models.UIConfig{},
+		&models.NovelConfig{},
 	)
 
 	if err != nil {

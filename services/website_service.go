@@ -19,6 +19,7 @@ type CreateWebsiteRequest struct {
 	CommonConfig    CommonConfigRequest `json:"common_config"`
 	PayConfig       PayConfigRequest    `json:"pay_config"`
 	UIConfig        UIConfigRequest     `json:"ui_config"`
+	NovelConfig     *NovelConfigRequest `json:"novel_config"`
 }
 
 type BasicInfoRequest struct {
@@ -67,6 +68,11 @@ type UIConfigRequest struct {
 	ThemeTextMain *string `json:"theme_text_main"`
 }
 
+type NovelConfigRequest struct {
+	TTJumpHomeUrl         string `json:"tt_jump_home_url"`
+	TTLoginCallbackDomain string `json:"tt_login_callback_domain"`
+}
+
 // WebsiteService 网站服务
 type WebsiteService struct {
 	db                     *gorm.DB
@@ -88,7 +94,7 @@ func NewWebsiteService() *WebsiteService {
 // CreateWebsite 创建网站（带回滚功能）
 func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest) (map[string]interface{}, error) {
 	// 创建回滚管理器
-	rollbackManager := utils.NewRollbackManager()
+	rollbackManager := utils.NewRollbackManager(s.config)
 
 	// 回滚函数
 	rollback := func(err error) error {
@@ -259,6 +265,24 @@ func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest) (map[string]in
 	rollbackManager.AddCreatedUIConfig(int(uiConfig.ID))
 	fmt.Printf("✅ 创建UIConfig成功: ID=%d\n", uiConfig.ID)
 
+	// 10. 创建NovelConfig（如果提供）
+	var novelConfig *models.NovelConfig
+	if req.NovelConfig != nil {
+		novelConfig = &models.NovelConfig{
+			ClientID:              client.ID,
+			TTJumpHomeUrl:         req.NovelConfig.TTJumpHomeUrl,
+			TTLoginCallbackDomain: req.NovelConfig.TTLoginCallbackDomain,
+		}
+		if err := tx.Create(novelConfig).Error; err != nil {
+			tx.Rollback()
+			return nil, rollback(fmt.Errorf("failed to create novel config: %v", err))
+		}
+		rollbackManager.AddCreatedNovelConfig(int(novelConfig.ID))
+		fmt.Printf("✅ 创建NovelConfig成功: ID=%d\n", novelConfig.ID)
+	} else {
+		fmt.Printf("ℹ️ 未提供NovelConfig，跳过创建\n")
+	}
+
 	// 提交数据库事务
 	if err := tx.Commit().Error; err != nil {
 		return nil, rollback(fmt.Errorf("failed to commit transaction: %v", err))
@@ -271,7 +295,7 @@ func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest) (map[string]in
 	}
 
 	// 11. 生成配置文件
-	if err := s.configGeneratorService.GenerateConfigFiles(brand.Code, client.Host, baseConfig, extraBaseConfig, commonConfig, payConfig, uiConfig, rollbackManager); err != nil {
+	if err := s.configGeneratorService.GenerateConfigFiles(brand.Code, client.Host, baseConfig, extraBaseConfig, commonConfig, payConfig, uiConfig, novelConfig, rollbackManager); err != nil {
 		return nil, rollback(fmt.Errorf("failed to generate config files: %v", err))
 	}
 

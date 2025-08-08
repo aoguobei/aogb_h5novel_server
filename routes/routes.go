@@ -84,6 +84,15 @@ func SetupRoutes() *gin.Engine {
 			uiConfigs.DELETE("/:id", configHandler.DeleteUIConfig)
 		}
 
+		// 小说配置路由
+		novelConfigs := api.Group("/novel-configs")
+		{
+			novelConfigs.GET("", configHandler.GetNovelConfigs)
+			novelConfigs.POST("", configHandler.CreateNovelConfig)
+			novelConfigs.PUT("/:id", configHandler.UpdateNovelConfig)
+			novelConfigs.DELETE("/:id", configHandler.DeleteNovelConfig)
+		}
+
 		// 网站创建路由
 		api.POST("/create-website", websiteHandler.CreateWebsite)
 

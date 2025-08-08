@@ -465,8 +465,7 @@ func (s *FileService) UpdateHostFileForBrand(brandCode string) error {
 func (s *FileService) updateIndexFileForBrand(brandCode string) error {
 	fmt.Printf("🔄 Starting updateIndexFileForBrand for brand: %s\n", brandCode)
 
-	// 使用正确的文件路径：AppConfig.js
-	// 	indexFilePath := "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/modules/mod_config/AppConfig.js"
+	// 使用配置文件中的IndexFile路径
 
 	content, err := os.ReadFile(s.config.File.IndexFile)
 	if err != nil {

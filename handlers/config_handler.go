@@ -332,6 +332,79 @@ func (h *ConfigHandler) DeleteUIConfig(c *gin.Context) {
 	utils.Success(c, nil, "UI配置删除成功")
 }
 
+// GetNovelConfigs 获取所有小说配置
+func (h *ConfigHandler) GetNovelConfigs(c *gin.Context) {
+	configs, err := h.configService.GetNovelConfigs()
+	if err != nil {
+		utils.InternalServerError(c, "获取小说配置列表失败")
+		return
+	}
+
+	utils.Success(c, gin.H{
+		"data":  configs,
+		"total": len(configs),
+	}, "获取小说配置列表成功")
+}
+
+// CreateNovelConfig 创建小说配置
+func (h *ConfigHandler) CreateNovelConfig(c *gin.Context) {
+	var config models.NovelConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		utils.BadRequest(c, "请求参数错误")
+		return
+	}
+
+	err := h.configService.CreateNovelConfig(&config)
+	if err != nil {
+		utils.InternalServerError(c, "创建小说配置失败")
+		return
+	}
+
+	utils.Created(c, gin.H{"data": config}, "小说配置创建成功")
+}
+
+// UpdateNovelConfig 更新小说配置
+func (h *ConfigHandler) UpdateNovelConfig(c *gin.Context) {
+	id := c.Param("id")
+	configID, err := strconv.Atoi(id)
+	if err != nil {
+		utils.BadRequest(c, "无效的配置ID")
+		return
+	}
+
+	var config models.NovelConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		utils.BadRequest(c, "请求参数错误")
+		return
+	}
+
+	err = h.configService.UpdateNovelConfig(configID, &config)
+	if err != nil {
+		utils.InternalServerError(c, "更新小说配置失败")
+		return
+	}
+
+	utils.Success(c, gin.H{"data": config}, "小说配置更新成功")
+}
+
+// DeleteNovelConfig 删除小说配置
+func (h *ConfigHandler) DeleteNovelConfig(c *gin.Context) {
+	id := c.Param("id")
+	configID, err := strconv.Atoi(id)
+	if err != nil {
+		utils.BadRequest(c, "无效的配置ID")
+		return
+	}
+
+	err = h.configService.DeleteNovelConfig(configID)
+	if err != nil {
+		utils.InternalServerError(c, "删除小说配置失败")
+		return
+	}
+
+	utils.Success(c, nil, "小说配置删除成功")
+}
+
 // GetWebsiteConfig 获取网站配置
 func (h *ConfigHandler) GetWebsiteConfig(c *gin.Context) {
 	clientID := c.Param("clientId")

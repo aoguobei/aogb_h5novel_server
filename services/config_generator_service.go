@@ -25,7 +25,7 @@ func NewConfigGeneratorService() *ConfigGeneratorService {
 }
 
 // GenerateConfigFiles 生成配置文件
-func (s *ConfigGeneratorService) GenerateConfigFiles(brandCode, host string, baseConfig models.BaseConfig, extraBaseConfig *models.BaseConfig, commonConfig models.CommonConfig, payConfig models.PayConfig, uiConfig models.UIConfig, rollbackManager *utils.RollbackManager) error {
+func (s *ConfigGeneratorService) GenerateConfigFiles(brandCode, host string, baseConfig models.BaseConfig, extraBaseConfig *models.BaseConfig, commonConfig models.CommonConfig, payConfig models.PayConfig, uiConfig models.UIConfig, novelConfig *models.NovelConfig, rollbackManager *utils.RollbackManager) error {
 	// 生成主BaseConfig文件
 	if err := s.writeBaseConfigToFile(baseConfig, brandCode, host, rollbackManager); err != nil {
 		return err
@@ -60,13 +60,21 @@ func (s *ConfigGeneratorService) GenerateConfigFiles(brandCode, host string, bas
 		return err
 	}
 
+	// 生成NovelConfig文件（如果存在）
+	if novelConfig != nil {
+		formattedNovelConfig := s.formatNovelConfig(*novelConfig)
+		if err := s.writeConfigToFile("novel", formattedNovelConfig, brandCode, host, rollbackManager); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 // writeBaseConfigToFile 将BaseConfig写入文件
 func (s *ConfigGeneratorService) writeBaseConfigToFile(baseConfig models.BaseConfig, brandCode string, host string, rollbackManager *utils.RollbackManager) error {
 	// 根据配置类型确定文件路径
-	configDir := "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig/baseConfigs"
+	configDir := s.config.File.BaseConfigsDir
 	fileName := brandCode + ".js"
 	configFile := filepath.Join(configDir, fileName)
 
@@ -142,14 +150,17 @@ func (s *ConfigGeneratorService) writeConfigToFile(configType string, formattedC
 
 	switch configType {
 	case "common":
-		configDir = "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig/commonConfigs"
+		configDir = s.config.File.CommonConfigsDir
 		fileName = brandCode + ".js"
 	case "pay":
-		configDir = "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig/payConfigs"
+		configDir = s.config.File.PayConfigsDir
 		fileName = brandCode + ".js"
 	case "ui":
-		configDir = "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig/uiConfigs"
+		configDir = s.config.File.UIConfigsDir
 		fileName = brandCode + ".js"
+	case "novel":
+		configDir = s.config.File.LocalConfigsDir
+		fileName = "novelConfig.js"
 	default:
 		return fmt.Errorf("unknown config type: %s", configType)
 	}
@@ -193,7 +204,17 @@ func (s *ConfigGeneratorService) writeConfigToFile(configType string, formattedC
 	}
 
 	// 使用host作为key，添加配置
-	configData[host] = formattedConfig
+	if configType == "novel" {
+		// novel配置使用特殊的结构：brandCode -> host -> config
+		if configData[brandCode] == nil {
+			configData[brandCode] = make(map[string]interface{})
+		}
+		brandConfig := configData[brandCode].(map[string]interface{})
+		brandConfig[host] = formattedConfig
+	} else {
+		// 其他配置直接使用host作为key
+		configData[host] = formattedConfig
+	}
 
 	// 转换为JSON并添加export default前缀
 	configJSON, err := json.MarshalIndent(configData, "", "  ")
@@ -274,4 +295,12 @@ func (s *ConfigGeneratorService) formatUIConfig(uiConfig models.UIConfig) map[st
 	}
 
 	return result
+}
+
+// formatNovelConfig 格式化小说配置
+func (s *ConfigGeneratorService) formatNovelConfig(novelConfig models.NovelConfig) map[string]interface{} {
+	return map[string]interface{}{
+		"tt_jump_home_url":         novelConfig.TTJumpHomeUrl,
+		"tt_login_callback_domain": novelConfig.TTLoginCallbackDomain,
+	}
 }

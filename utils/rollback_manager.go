@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"brand-config-api/config"
 	"brand-config-api/database"
 	"brand-config-api/models"
 )
@@ -12,6 +13,7 @@ import (
 // RollbackManager 回滚管理器
 type RollbackManager struct {
 	createdResources *CreatedResources
+	config           *config.Config
 }
 
 // CreatedResources 记录创建的资源，用于回滚
@@ -23,16 +25,18 @@ type CreatedResources struct {
 	CommonConfigID    int
 	PayConfigID       int
 	UIConfigID        int
+	NovelConfigID     int
 	CreatedFiles      []string
 	ModifiedFiles     map[string]string // 文件路径 -> 原始内容
 }
 
 // NewRollbackManager 创建回滚管理器
-func NewRollbackManager() *RollbackManager {
+func NewRollbackManager(cfg *config.Config) *RollbackManager {
 	return &RollbackManager{
 		createdResources: &CreatedResources{
 			ModifiedFiles: make(map[string]string),
 		},
+		config: cfg,
 	}
 }
 
@@ -69,6 +73,11 @@ func (r *RollbackManager) AddCreatedPayConfig(configID int) {
 // AddCreatedUIConfig 添加创建的UI配置
 func (r *RollbackManager) AddCreatedUIConfig(configID int) {
 	r.createdResources.UIConfigID = configID
+}
+
+// AddCreatedNovelConfig 添加创建的小说配置
+func (r *RollbackManager) AddCreatedNovelConfig(configID int) {
+	r.createdResources.NovelConfigID = configID
 }
 
 // AddCreatedFile 添加创建的文件
@@ -136,6 +145,15 @@ func (r *RollbackManager) rollbackDatabaseOperations() error {
 			fmt.Printf("❌ 删除UIConfig失败: %v\n", err)
 		} else {
 			fmt.Printf("✅ 删除UIConfig成功: ID=%d\n", r.createdResources.UIConfigID)
+		}
+	}
+
+	// 删除NovelConfig
+	if r.createdResources.NovelConfigID > 0 {
+		if err := database.DB.Delete(&models.NovelConfig{}, r.createdResources.NovelConfigID).Error; err != nil {
+			fmt.Printf("❌ 删除NovelConfig失败: %v\n", err)
+		} else {
+			fmt.Printf("✅ 删除NovelConfig成功: ID=%d\n", r.createdResources.NovelConfigID)
 		}
 	}
 
@@ -214,7 +232,31 @@ func (r *RollbackManager) BackupFile(filePath string) error {
 
 // BackupConfigFile 备份配置文件
 func (r *RollbackManager) BackupConfigFile(configType, brandCode string) error {
-	configFile := filepath.Join("C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig", configType+"Configs", brandCode+".js")
+	var configDir string
+	var fileName string
+
+	switch configType {
+	case "base":
+		configDir = r.config.File.BaseConfigsDir
+		fileName = brandCode + ".js"
+	case "common":
+		configDir = r.config.File.CommonConfigsDir
+		fileName = brandCode + ".js"
+	case "pay":
+		configDir = r.config.File.PayConfigsDir
+		fileName = brandCode + ".js"
+	case "ui":
+		configDir = r.config.File.UIConfigsDir
+		fileName = brandCode + ".js"
+	case "novel":
+		configDir = r.config.File.LocalConfigsDir
+		fileName = "novelConfig.js"
+	default:
+		configDir = r.config.File.ConfigDir
+		fileName = brandCode + ".js"
+	}
+
+	configFile := filepath.Join(configDir, fileName)
 	return r.BackupFile(configFile)
 }
 
