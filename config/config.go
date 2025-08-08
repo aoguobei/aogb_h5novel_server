@@ -1,0 +1,90 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+)
+
+// Config 应用配置结构
+type Config struct {
+	Database DatabaseConfig
+	Server   ServerConfig
+	File     FileConfig
+}
+
+// DatabaseConfig 数据库配置
+type DatabaseConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	Name     string
+}
+
+// ServerConfig 服务器配置
+type ServerConfig struct {
+	Port string
+	Mode string
+}
+
+// FileConfig 文件操作配置
+type FileConfig struct {
+	ProjectRoot    string
+	ConfigDir      string
+	PrebuildDir    string
+	StaticDir      string
+	HostFile       string
+	IndexFile      string
+	ViteConfigFile string
+	PackageFile    string
+}
+
+// Load 加载配置
+func Load() *Config {
+	return &Config{
+		Database: DatabaseConfig{
+			Host:     getEnv("DB_HOST", "localhost"),
+			Port:     getEnv("DB_PORT", "3306"),
+			User:     getEnv("DB_USER", "root"),
+			Password: getEnv("DB_PASSWORD", "aoguobei-otzf"),
+			Name:     getEnv("DB_NAME", "h5novel_config"),
+		},
+		Server: ServerConfig{
+			Port: getEnv("PORT", "8080"),
+			Mode: getEnv("GIN_MODE", "debug"),
+		},
+		File: FileConfig{
+			ProjectRoot:    "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel",
+			ConfigDir:      "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig",
+			PrebuildDir:    "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/prebuild/build",
+			StaticDir:      "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/static",
+			HostFile:       "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig/_host.js",
+			IndexFile:      "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/src/appConfig/index.js",
+			ViteConfigFile: "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/vite.config.js",
+			PackageFile:    "C:/F_explorer/h5projects/jianruiH5/novel_h5config/funNovel/package.json",
+		},
+	}
+}
+
+// getEnv 获取环境变量，如果不存在则返回默认值
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+// GetConfigPath 获取配置文件路径
+func (c *Config) GetConfigPath(configType, brandCode string) string {
+	return filepath.Join(c.File.ConfigDir, configType+"Configs", brandCode+".js")
+}
+
+// GetPrebuildPath 获取prebuild路径
+func (c *Config) GetPrebuildPath(brandCode string) string {
+	return filepath.Join(c.File.PrebuildDir, brandCode)
+}
+
+// GetStaticPath 获取static路径
+func (c *Config) GetStaticPath(brandCode string) string {
+	return filepath.Join(c.File.StaticDir, "img-"+brandCode)
+}

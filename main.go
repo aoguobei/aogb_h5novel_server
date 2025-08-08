@@ -2,29 +2,21 @@ package main
 
 import (
 	"log"
-	"os"
 
+	"brand-config-api/config"
 	"brand-config-api/database"
+	"brand-config-api/middleware"
 	"brand-config-api/routes"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	// 设置默认环境变量
-	if os.Getenv("DB_HOST") == "" {
-		os.Setenv("DB_HOST", "localhost")
-	}
-	if os.Getenv("DB_PORT") == "" {
-		os.Setenv("DB_PORT", "3306")
-	}
-	if os.Getenv("DB_USER") == "" {
-		os.Setenv("DB_USER", "root")
-	}
-	if os.Getenv("DB_PASSWORD") == "" {
-		os.Setenv("DB_PASSWORD", "aoguobei-otzf")
-	}
-	if os.Getenv("DB_NAME") == "" {
-		os.Setenv("DB_NAME", "h5novel_config")
-	}
+	// 加载配置
+	cfg := config.Load()
+
+	// 设置Gin模式
+	gin.SetMode(cfg.Server.Mode)
 
 	// 初始化数据库
 	database.InitDB()
@@ -32,14 +24,15 @@ func main() {
 	// 设置路由
 	r := routes.SetupRoutes()
 
-	// 启动服务器
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	// 添加中间件
+	r.Use(middleware.Logger())
+	r.Use(middleware.Recovery())
+	r.Use(middleware.ErrorHandler())
+	r.Use(middleware.CORS())
+	r.Use(middleware.RequestID())
 
-	log.Printf("Server starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
+	log.Printf("Server starting on port %s", cfg.Server.Port)
+	if err := r.Run(":" + cfg.Server.Port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }

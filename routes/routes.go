@@ -18,71 +18,77 @@ func SetupRoutes() *gin.Engine {
 	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
 	r.Use(cors.New(config))
 
+	// 创建控制器实例
+	brandHandler := handlers.NewBrandHandler()
+	clientHandler := handlers.NewClientHandler()
+	configHandler := handlers.NewConfigHandler()
+	websiteHandler := handlers.NewWebsiteHandler()
+
 	// API路由组
 	api := r.Group("/api")
 	{
 		// 品牌相关路由
 		brands := api.Group("/brands")
 		{
-			brands.GET("", handlers.GetBrands)
-			brands.GET("/:id", handlers.GetBrand)
-			brands.POST("", handlers.CreateBrand)
-			brands.PUT("/:id", handlers.UpdateBrand)
-			brands.DELETE("/:id", handlers.DeleteBrand)
+			brands.GET("", brandHandler.GetBrands)
+			brands.GET("/:id", brandHandler.GetBrand)
+			brands.POST("", brandHandler.CreateBrand)
+			brands.PUT("/:id", brandHandler.UpdateBrand)
+			brands.DELETE("/:id", brandHandler.DeleteBrand)
 		}
 
 		// 客户端相关路由
 		clients := api.Group("/clients")
 		{
-			clients.GET("", handlers.GetClients)
-			clients.GET("/:id", handlers.GetClient)
-			clients.POST("", handlers.CreateClient)
-			clients.PUT("/:id", handlers.UpdateClient)
-			clients.DELETE("/:id", handlers.DeleteClient)
+			clients.GET("", clientHandler.GetClients)
+			clients.GET("/:id", clientHandler.GetClient)
+			clients.POST("", clientHandler.CreateClient)
+			clients.PUT("/:id", clientHandler.UpdateClient)
+			clients.DELETE("/:id", clientHandler.DeleteClient)
 		}
 
 		// 基础配置路由
 		baseConfigs := api.Group("/base-configs")
 		{
-			baseConfigs.GET("", handlers.GetBaseConfigs)
-			baseConfigs.GET("/:id", handlers.GetBaseConfig)
-			baseConfigs.POST("", handlers.CreateBaseConfig)
-			baseConfigs.PUT("/:id", handlers.UpdateBaseConfig)
-			baseConfigs.DELETE("/:id", handlers.DeleteBaseConfig)
+			baseConfigs.GET("", configHandler.GetBaseConfigs)
+			baseConfigs.GET("/:id", configHandler.GetBaseConfig)
+			baseConfigs.POST("", configHandler.CreateBaseConfig)
+			baseConfigs.PUT("/:id", configHandler.UpdateBaseConfig)
+			baseConfigs.DELETE("/:id", configHandler.DeleteBaseConfig)
 		}
 
 		// 通用配置路由
 		commonConfigs := api.Group("/common-configs")
 		{
-			commonConfigs.GET("", handlers.GetCommonConfigs)
-			commonConfigs.POST("", handlers.CreateCommonConfig)
-			commonConfigs.PUT("/:id", handlers.UpdateCommonConfig)
-			commonConfigs.DELETE("/:id", handlers.DeleteCommonConfig)
+			commonConfigs.GET("", configHandler.GetCommonConfigs)
+			commonConfigs.POST("", configHandler.CreateCommonConfig)
+			commonConfigs.PUT("/:id", configHandler.UpdateCommonConfig)
+			commonConfigs.DELETE("/:id", configHandler.DeleteCommonConfig)
 		}
 
 		// 支付配置路由
 		payConfigs := api.Group("/pay-configs")
 		{
-			payConfigs.GET("", handlers.GetPayConfigs)
-			payConfigs.POST("", handlers.CreatePayConfig)
-			payConfigs.PUT("/:id", handlers.UpdatePayConfig)
-			payConfigs.DELETE("/:id", handlers.DeletePayConfig)
+			payConfigs.GET("", configHandler.GetPayConfigs)
+			payConfigs.POST("", configHandler.CreatePayConfig)
+			payConfigs.PUT("/:id", configHandler.UpdatePayConfig)
+			payConfigs.DELETE("/:id", configHandler.DeletePayConfig)
 		}
 
 		// UI配置路由
 		uiConfigs := api.Group("/ui-configs")
 		{
-			uiConfigs.GET("", handlers.GetUIConfigs)
-			uiConfigs.POST("", handlers.CreateUIConfig)
-			uiConfigs.PUT("/:id", handlers.UpdateUIConfig)
-			uiConfigs.DELETE("/:id", handlers.DeleteUIConfig)
+			uiConfigs.GET("", configHandler.GetUIConfigs)
+			uiConfigs.POST("", configHandler.CreateUIConfig)
+			uiConfigs.PUT("/:id", configHandler.UpdateUIConfig)
+			uiConfigs.DELETE("/:id", configHandler.DeleteUIConfig)
 		}
 
 		// 网站创建路由
-		api.POST("/create-website", handlers.CreateWebsite)
+		api.POST("/create-website", websiteHandler.CreateWebsite)
 
 		// 网站配置查询路由
-		api.GET("/website-config/:clientId", handlers.GetWebsiteConfig)
+		api.GET("/website-config/:clientId", configHandler.GetWebsiteConfig)
 	}
 
 	return r
