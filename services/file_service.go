@@ -1,7 +1,6 @@
 package services
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -184,7 +183,7 @@ func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host
 
 // CreateStaticImageDirectory 创建static图片目录
 func (s *FileService) CreateStaticImageDirectory(brandCode string, rollbackManager *utils.RollbackManager) error {
-	sourceDir := filepath.Join(s.config.File.StaticDir, "img-xingchen")
+	sourceDir := filepath.Join(s.config.File.StaticDir, "img-jinse")
 	targetDir := s.config.GetStaticPath(brandCode)
 
 	// 检查源目录是否存在
@@ -259,78 +258,96 @@ func (s *FileService) updatePackageJSONFile(brandCode, host string, appName stri
 		return fmt.Errorf("failed to read package.json: %v", err)
 	}
 
-	// 解析JSON
-	var packageData map[string]interface{}
-	if err := json.Unmarshal(content, &packageData); err != nil {
-		return fmt.Errorf("failed to parse package.json: %v", err)
-	}
-
-	// 1. 更新 scripts 部分
-	scripts, ok := packageData["scripts"].(map[string]interface{})
-	if !ok {
-		scripts = make(map[string]interface{})
-		packageData["scripts"] = scripts
-	}
+	contentStr := string(content)
 
 	// 生成平台标识
 	platformKey := fmt.Sprintf("%s-%s", host, brandCode)
 
-	// 添加dev脚本（不需要cross-env前缀）
-	devScriptKey := fmt.Sprintf("dev:%s", platformKey)
-	if _, exists := scripts[devScriptKey]; !exists {
-		scripts[devScriptKey] = fmt.Sprintf("uni -p %s --minify", platformKey)
+	// 检查是否已经存在该配置
+	if strings.Contains(contentStr, fmt.Sprintf(`"dev:%s"`, platformKey)) {
+		fmt.Printf("⚠️  Platform %s already exists in package.json, skipping...\n", platformKey)
+		return nil
 	}
 
-	// 添加build脚本（需要cross-env前缀）
-	buildScriptKey := fmt.Sprintf("build:%s", platformKey)
-	if _, exists := scripts[buildScriptKey]; !exists {
-		scripts[buildScriptKey] = fmt.Sprintf("cross-env UNI_UTS_PLATFORM=%s npm run prebuild && uni build -p %s --minify", platformKey, platformKey)
+	// 1. 添加scripts - 在scripts块的末尾添加
+	scriptsEndIndex := s.findScriptsEndIndex(contentStr)
+	if scriptsEndIndex > 0 {
+		fmt.Printf("🔍 Found scripts block end position: %d\n", scriptsEndIndex)
+
+		// 找到scripts块中最后一个脚本的结束位置
+		lastScriptEndIndex := s.findLastScriptEndIndex(contentStr, scriptsEndIndex)
+		if lastScriptEndIndex > 0 {
+			fmt.Printf("🔍 Found last script end position: %d\n", lastScriptEndIndex)
+
+			// 在最后一个脚本后面添加逗号和新脚本
+			newScripts := fmt.Sprintf(`,
+    "dev:%s": "uni -p %s --minify",
+    "build:%s": "cross-env UNI_UTS_PLATFORM=%s npm run prebuild && uni build -p %s --minify"`,
+				platformKey, platformKey, platformKey, platformKey, platformKey)
+
+			// 在最后一个脚本后面插入新内容
+			contentStr = contentStr[:lastScriptEndIndex] + newScripts + contentStr[lastScriptEndIndex:]
+			fmt.Println("✅ Added scripts configuration")
+		} else {
+			fmt.Println("❌ Could not find last script position")
+			return fmt.Errorf("failed to find last script position")
+		}
+	} else {
+		fmt.Println("❌ Could not find scripts block")
+		return fmt.Errorf("failed to find scripts block")
 	}
 
-	// 2. 更新 uni-app.scripts 部分
-	uniApp, ok := packageData["uni-app"].(map[string]interface{})
-	if !ok {
-		uniApp = make(map[string]interface{})
-		packageData["uni-app"] = uniApp
+	// 2. 添加uni-app.scripts - 在uni-app.scripts块的末尾添加
+	uniAppScriptsEndIndex := s.findUniAppScriptsEndIndex(contentStr)
+	if uniAppScriptsEndIndex > 0 {
+		fmt.Printf("🔍 Found uni-app.scripts block end position: %d\n", uniAppScriptsEndIndex)
+
+		// 找到uni-app.scripts块中最后一个配置的结束位置
+		lastUniAppScriptEndIndex := s.findLastUniAppScriptEndIndex(contentStr, uniAppScriptsEndIndex)
+		if lastUniAppScriptEndIndex > 0 {
+			fmt.Printf("🔍 Found last uni-app script end position: %d\n", lastUniAppScriptEndIndex)
+
+			// 在最后一个配置后面添加逗号和新配置
+			newUniAppScript := fmt.Sprintf(`,
+    "%s": {
+      "env": {
+        "UNI_PLATFORM": "%s"
+      },
+      "define": {
+        "MP-%s": true`, platformKey, s.getUniPlatform(host), strings.ToUpper(brandCode))
+
+			// 根据host类型设置对应的平台宏
+			switch host {
+			case "tth5":
+				newUniAppScript += `,
+        "MP-TTH5": true`
+			case "ksh5":
+				newUniAppScript += `,
+        "MP-KSH5": true`
+			case "h5":
+				newUniAppScript += `,
+        "MP-H5": true`
+			}
+
+			newUniAppScript += fmt.Sprintf(`
+      },
+      "title": "h5%s"
+    }`, appName)
+
+			// 在最后一个配置后面插入新内容
+			contentStr = contentStr[:lastUniAppScriptEndIndex] + newUniAppScript + contentStr[lastUniAppScriptEndIndex:]
+			fmt.Println("✅ Added uni-app.scripts configuration")
+		} else {
+			fmt.Println("❌ Could not find last uni-app script position")
+			return fmt.Errorf("failed to find last uni-app script position")
+		}
+	} else {
+		fmt.Println("❌ Could not find uni-app.scripts block")
+		return fmt.Errorf("failed to find uni-app.scripts block")
 	}
 
-	uniAppScripts, ok := uniApp["scripts"].(map[string]interface{})
-	if !ok {
-		uniAppScripts = make(map[string]interface{})
-		uniApp["scripts"] = uniAppScripts
-	}
-
-	// 创建平台配置
-	platformConfig := map[string]interface{}{
-		"env": map[string]interface{}{
-			"UNI_PLATFORM": s.getUniPlatform(host),
-		},
-		"define": map[string]interface{}{
-			fmt.Sprintf("MP-%s", strings.ToUpper(brandCode)): true,
-		},
-		"title": fmt.Sprintf("h5%s", appName),
-	}
-
-	// 根据host类型设置对应的平台宏
-	define := platformConfig["define"].(map[string]interface{})
-	switch host {
-	case "tth5":
-		define["MP-TTH5"] = true
-	case "ksh5":
-		define["MP-KSH5"] = true
-	case "h5":
-		define["MP-H5"] = true
-	}
-
-	uniAppScripts[platformKey] = platformConfig
-
-	// 写回文件
-	newContent, err := json.MarshalIndent(packageData, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal package.json: %v", err)
-	}
-
-	if err := os.WriteFile(s.config.File.PackageFile, newContent, 0644); err != nil {
+	// 写回文件，保持原有格式
+	if err := os.WriteFile(s.config.File.PackageFile, []byte(contentStr), 0644); err != nil {
 		return fmt.Errorf("failed to write package.json: %v", err)
 	}
 
@@ -528,4 +545,134 @@ func (s *FileService) updateIndexFileForBrand(brandCode string) error {
 
 	fmt.Printf("✅ Updated index.js for brand %s\n", brandCode)
 	return nil
+}
+
+// findScriptsEndIndex 找到scripts块的结束位置
+func (s *FileService) findScriptsEndIndex(content string) int {
+	// 查找 "scripts": { 的开始位置
+	scriptsStart := strings.Index(content, `"scripts": {`)
+	if scriptsStart == -1 {
+		return -1
+	}
+
+	// 从scripts开始位置向后查找对应的结束大括号
+	braceCount := 0
+
+	for i := scriptsStart; i < len(content); i++ {
+		if content[i] == '{' {
+			braceCount++
+		} else if content[i] == '}' {
+			braceCount--
+			if braceCount == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
+}
+
+// findLastScriptEndIndex 找到scripts块中最后一个脚本的结束位置
+func (s *FileService) findLastScriptEndIndex(content string, scriptsEndIndex int) int {
+	// 从scripts块开始位置向后查找
+	scriptsStart := strings.Index(content, `"scripts": {`)
+	if scriptsStart == -1 {
+		return -1
+	}
+
+	// 在scripts块中查找最后一个脚本的结束位置
+	// 从scripts结束位置向前查找最后一个脚本的结束引号
+	for i := scriptsEndIndex - 1; i > scriptsStart; i-- {
+		// 查找最后一个脚本的结束引号
+		if content[i] == '"' {
+			// 向前查找这个脚本的开始引号
+			for j := i - 1; j > scriptsStart; j-- {
+				if content[j] == '"' {
+					// 找到了脚本值的开始引号，现在需要找到这个值的结束引号
+					// 从开始引号向后查找结束引号
+					for k := j + 1; k < scriptsEndIndex; k++ {
+						if content[k] == '"' {
+							// 找到了值的结束引号，返回这个位置
+							return k + 1
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return -1
+}
+
+// findUniAppScriptsEndIndex 找到uni-app.scripts块的结束位置
+func (s *FileService) findUniAppScriptsEndIndex(content string) int {
+	// 查找 "uni-app": { 的开始位置
+	uniAppStart := strings.Index(content, `"uni-app": {`)
+	if uniAppStart == -1 {
+		return -1
+	}
+
+	// 从uni-app开始位置向后查找 "scripts": { 的开始位置
+	scriptsStart := strings.Index(content[uniAppStart:], `"scripts": {`)
+	if scriptsStart == -1 {
+		return -1
+	}
+
+	scriptsStart += uniAppStart
+
+	// 从scripts开始位置向后查找对应的结束大括号
+	braceCount := 0
+
+	for i := scriptsStart; i < len(content); i++ {
+		if content[i] == '{' {
+			braceCount++
+		} else if content[i] == '}' {
+			braceCount--
+			if braceCount == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
+}
+
+// findLastUniAppScriptEndIndex 找到uni-app.scripts块中最后一个配置的结束位置
+func (s *FileService) findLastUniAppScriptEndIndex(content string, uniAppScriptsEndIndex int) int {
+	// 从uni-app.scripts块开始位置向后查找
+	uniAppStart := strings.Index(content, `"uni-app": {`)
+	if uniAppStart == -1 {
+		return -1
+	}
+
+	// 从uni-app开始位置向后查找 "scripts": { 的开始位置
+	scriptsStart := strings.Index(content[uniAppStart:], `"scripts": {`)
+	if scriptsStart == -1 {
+		return -1
+	}
+
+	scriptsStart += uniAppStart
+
+	// 在uni-app.scripts块中查找最后一个配置的结束位置
+	// 从scripts结束位置向前查找最后一个配置的结束大括号
+	for i := uniAppScriptsEndIndex - 1; i > scriptsStart; i-- {
+		// 查找最后一个配置的结束大括号
+		if content[i] == '}' {
+			// 向前查找这个配置的开始大括号
+			braceCount := 1
+			for j := i - 1; j > scriptsStart; j-- {
+				if content[j] == '}' {
+					braceCount++
+				} else if content[j] == '{' {
+					braceCount--
+					if braceCount == 0 {
+						// 找到了配置的开始大括号，返回结束大括号后的位置
+						return i + 1
+					}
+				}
+			}
+		}
+	}
+
+	return -1
 }
