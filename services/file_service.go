@@ -48,6 +48,9 @@ func (s *FileService) BackupProjectFiles(brandCode string, rollbackManager *util
 	if err := rollbackManager.BackupConfigFile("ui", brandCode); err != nil {
 		return err
 	}
+	if err := rollbackManager.BackupConfigFile("novel", brandCode); err != nil {
+		return err
+	}
 
 	return nil
 }

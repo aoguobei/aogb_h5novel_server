@@ -44,7 +44,6 @@ type FileConfig struct {
 	PayConfigsDir    string
 	UIConfigsDir     string
 	LocalConfigsDir  string
-	NovelConfigFile  string
 }
 
 // Load 加载配置
@@ -79,7 +78,6 @@ func Load() *Config {
 			PayConfigsDir:    filepath.Join(basePath, "funNovel/src/appConfig/payConfigs"),
 			UIConfigsDir:     filepath.Join(basePath, "funNovel/src/appConfig/uiConfigs"),
 			LocalConfigsDir:  filepath.Join(basePath, "funNovel/src/appConfig/localConfigs"),
-			NovelConfigFile:  filepath.Join(basePath, "funNovel/src/appConfig/localConfigs"),
 		},
 	}
 }
