@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"brand-config-api/config"
-	"brand-config-api/utils"
+	"brand-config-api/utils/rollback"
 )
 
 // FileService 文件操作服务
@@ -23,40 +23,8 @@ func NewFileService() *FileService {
 	}
 }
 
-// BackupProjectFiles 备份项目文件
-func (s *FileService) BackupProjectFiles(brandCode string, rollbackManager *utils.RollbackManager) error {
-	// 备份vite.config.js
-	if err := rollbackManager.BackupProjectFile(s.config.File.ViteConfigFile); err != nil {
-		return err
-	}
-
-	// 备份package.json
-	if err := rollbackManager.BackupProjectFile(s.config.File.PackageFile); err != nil {
-		return err
-	}
-
-	// 备份配置文件
-	if err := rollbackManager.BackupConfigFile("base", brandCode); err != nil {
-		return err
-	}
-	if err := rollbackManager.BackupConfigFile("common", brandCode); err != nil {
-		return err
-	}
-	if err := rollbackManager.BackupConfigFile("pay", brandCode); err != nil {
-		return err
-	}
-	if err := rollbackManager.BackupConfigFile("ui", brandCode); err != nil {
-		return err
-	}
-	if err := rollbackManager.BackupConfigFile("novel", brandCode); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // UpdateProjectConfigs 更新项目配置文件
-func (s *FileService) UpdateProjectConfigs(brandCode, host string, scriptBase string, appName string, rollbackManager *utils.RollbackManager) error {
+func (s *FileService) UpdateProjectConfigs(brandCode, host string, scriptBase string, appName string, rollbackManager *rollback.RollbackManager) error {
 	// 注意：_host.js 只在新建品牌时更新，不在新建网站时更新
 	// 所以这里不调用 updateHostFileForBrand
 
@@ -79,7 +47,7 @@ func (s *FileService) UpdateProjectConfigs(brandCode, host string, scriptBase st
 }
 
 // CreatePrebuildFiles 创建prebuild文件
-func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host string, rollbackManager *utils.RollbackManager) error {
+func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host string, rollbackManager *rollback.RollbackManager) error {
 	brandDir := s.config.GetPrebuildPath(brandCode)
 
 	// 确保品牌目录存在
@@ -185,7 +153,7 @@ func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host
 }
 
 // CreateStaticImageDirectory 创建static图片目录
-func (s *FileService) CreateStaticImageDirectory(brandCode string, rollbackManager *utils.RollbackManager) error {
+func (s *FileService) CreateStaticImageDirectory(brandCode string, rollbackManager *rollback.RollbackManager) error {
 	sourceDir := filepath.Join(s.config.File.StaticDir, "img-jinse")
 	targetDir := s.config.GetStaticPath(brandCode)
 

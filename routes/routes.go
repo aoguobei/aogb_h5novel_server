@@ -21,8 +21,12 @@ func SetupRoutes() *gin.Engine {
 	// 创建控制器实例
 	brandHandler := handlers.NewBrandHandler()
 	clientHandler := handlers.NewClientHandler()
-	configHandler := handlers.NewConfigHandler()
 	websiteHandler := handlers.NewWebsiteHandler()
+	baseConfigHandler := handlers.NewBaseConfigHandler()
+	commonConfigHandler := handlers.NewCommonConfigHandler()
+	payConfigHandler := handlers.NewPayConfigHandler()
+	uiConfigHandler := handlers.NewUIConfigHandler()
+	novelConfigHandler := handlers.NewNovelConfigHandler()
 
 	// API路由组
 	api := r.Group("/api")
@@ -50,54 +54,56 @@ func SetupRoutes() *gin.Engine {
 		// 基础配置路由
 		baseConfigs := api.Group("/base-configs")
 		{
-			baseConfigs.GET("", configHandler.GetBaseConfigs)
-			baseConfigs.GET("/:id", configHandler.GetBaseConfig)
-			baseConfigs.POST("", configHandler.CreateBaseConfig)
-			baseConfigs.PUT("/:id", configHandler.UpdateBaseConfig)
-			baseConfigs.DELETE("/:id", configHandler.DeleteBaseConfig)
+			baseConfigs.GET("", baseConfigHandler.GetBaseConfigs)
+			// baseConfigs.GET("/:id", baseConfigHandler.GetBaseConfigByID)
+			baseConfigs.POST("", baseConfigHandler.CreateBaseConfig)
+			// baseConfigs.PUT("/:id", baseConfigHandler.UpdateBaseConfig)
+			baseConfigs.DELETE("/:id", baseConfigHandler.DeleteBaseConfig)
+			baseConfigs.PUT("/:clientId", baseConfigHandler.UpdateBaseConfigByClientID)
+			baseConfigs.GET("/:clientId", baseConfigHandler.GetBaseConfigByClientID)
 		}
 
 		// 通用配置路由
 		commonConfigs := api.Group("/common-configs")
 		{
-			commonConfigs.GET("", configHandler.GetCommonConfigs)
-			commonConfigs.POST("", configHandler.CreateCommonConfig)
-			commonConfigs.PUT("/:id", configHandler.UpdateCommonConfig)
-			commonConfigs.DELETE("/:id", configHandler.DeleteCommonConfig)
+			commonConfigs.GET("", commonConfigHandler.GetCommonConfigs)
+			commonConfigs.POST("", commonConfigHandler.CreateCommonConfig)
+			commonConfigs.PUT("/:id", commonConfigHandler.UpdateCommonConfig)
+			commonConfigs.DELETE("/:id", commonConfigHandler.DeleteCommonConfig)
 		}
 
 		// 支付配置路由
 		payConfigs := api.Group("/pay-configs")
 		{
-			payConfigs.GET("", configHandler.GetPayConfigs)
-			payConfigs.POST("", configHandler.CreatePayConfig)
-			payConfigs.PUT("/:id", configHandler.UpdatePayConfig)
-			payConfigs.DELETE("/:id", configHandler.DeletePayConfig)
+			payConfigs.GET("", payConfigHandler.GetPayConfigs)
+			payConfigs.POST("", payConfigHandler.CreatePayConfig)
+			payConfigs.PUT("/:id", payConfigHandler.UpdatePayConfig)
+			payConfigs.DELETE("/:id", payConfigHandler.DeletePayConfig)
 		}
 
 		// UI配置路由
 		uiConfigs := api.Group("/ui-configs")
 		{
-			uiConfigs.GET("", configHandler.GetUIConfigs)
-			uiConfigs.POST("", configHandler.CreateUIConfig)
-			uiConfigs.PUT("/:id", configHandler.UpdateUIConfig)
-			uiConfigs.DELETE("/:id", configHandler.DeleteUIConfig)
+			uiConfigs.GET("", uiConfigHandler.GetUIConfigs)
+			uiConfigs.POST("", uiConfigHandler.CreateUIConfig)
+			uiConfigs.PUT("/:id", uiConfigHandler.UpdateUIConfig)
+			uiConfigs.DELETE("/:id", uiConfigHandler.DeleteUIConfig)
 		}
 
 		// 小说配置路由
 		novelConfigs := api.Group("/novel-configs")
 		{
-			novelConfigs.GET("", configHandler.GetNovelConfigs)
-			novelConfigs.POST("", configHandler.CreateNovelConfig)
-			novelConfigs.PUT("/:id", configHandler.UpdateNovelConfig)
-			novelConfigs.DELETE("/:id", configHandler.DeleteNovelConfig)
+			novelConfigs.GET("", novelConfigHandler.GetNovelConfigs)
+			novelConfigs.POST("", novelConfigHandler.CreateNovelConfig)
+			novelConfigs.PUT("/:id", novelConfigHandler.UpdateNovelConfig)
+			novelConfigs.DELETE("/:id", novelConfigHandler.DeleteNovelConfig)
 		}
 
 		// 网站创建路由
 		api.POST("/create-website", websiteHandler.CreateWebsite)
 
 		// 网站配置查询路由
-		api.GET("/website-config/:clientId", configHandler.GetWebsiteConfig)
+		api.GET("/website-config/:clientId", websiteHandler.GetWebsiteConfig)
 	}
 
 	return r

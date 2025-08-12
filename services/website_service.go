@@ -7,6 +7,7 @@ import (
 	"brand-config-api/database"
 	"brand-config-api/models"
 	"brand-config-api/utils"
+	"brand-config-api/utils/rollback"
 
 	"gorm.io/gorm"
 )
@@ -75,103 +76,285 @@ type NovelConfigRequest struct {
 
 // WebsiteService 网站服务
 type WebsiteService struct {
-	db                     *gorm.DB
-	config                 *config.Config
-	fileService            *FileService
-	configGeneratorService *ConfigGeneratorService
+	db          *gorm.DB
+	config      *config.Config
+	fileService *FileService
 }
 
 // NewWebsiteService 创建网站服务实例
 func NewWebsiteService() *WebsiteService {
 	return &WebsiteService{
-		db:                     database.DB,
-		config:                 config.Load(),
-		fileService:            NewFileService(),
-		configGeneratorService: NewConfigGeneratorService(),
+		db:          database.DB,
+		config:      config.Load(),
+		fileService: NewFileService(),
 	}
 }
 
-// CreateWebsite 创建网站（带回滚功能）
+// CreateWebsite 创建网站
 func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest) (map[string]interface{}, error) {
 	// 创建回滚管理器
-	rollbackManager := utils.NewRollbackManager(s.config)
+	rollbackManager := rollback.NewRollbackManager(s.db, s.config)
 
-	// 回滚函数
-	rollback := func(err error) error {
-		fmt.Printf("❌ 创建失败，开始回滚: %v\n", err)
-		if rollbackErr := rollbackManager.Rollback(); rollbackErr != nil {
-			return fmt.Errorf("回滚失败: %v, 原始错误: %v", rollbackErr, err)
+	var result map[string]interface{}
+
+	err := rollbackManager.ExecuteWithTransaction(func(ctx *rollback.TransactionContext) error {
+		// 创建客户端
+		client, err := s.createClient(ctx.DB, req.BasicInfo)
+		if err != nil {
+			return fmt.Errorf("failed to create client: %v", err)
 		}
-		return err
-	}
 
-	// 开始事务
-	tx := s.db.Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-			rollback(fmt.Errorf("panic: %v", r))
+		// 创建基础配置
+		baseConfig, err := s.createBaseConfig(ctx.DB, req.BaseConfig, int(client.ID))
+		if err != nil {
+			return fmt.Errorf("failed to create base config: %v", err)
 		}
-	}()
 
-	// 1. 验证品牌是否存在
-	var brand models.Brand
-	if err := tx.First(&brand, req.BasicInfo.BrandID).Error; err != nil {
-		tx.Rollback()
-		return nil, rollback(fmt.Errorf("brand not found"))
+		// 创建通用配置
+		commonConfig, err := s.createCommonConfig(ctx.DB, req.CommonConfig, int(client.ID))
+		if err != nil {
+			return fmt.Errorf("failed to create common config: %v", err)
+		}
+
+		// 创建支付配置
+		payConfig, err := s.createPayConfig(ctx.DB, req.PayConfig, int(client.ID))
+		if err != nil {
+			return fmt.Errorf("failed to create pay config: %v", err)
+		}
+
+		// 创建UI配置
+		uiConfig, err := s.createUIConfig(ctx.DB, req.UIConfig, int(client.ID))
+		if err != nil {
+			return fmt.Errorf("failed to create UI config: %v", err)
+		}
+
+		// 创建额外客户端和基础配置（如果需要）
+		var extraClient *models.Client
+		var extraBaseConfig *models.BaseConfig
+		if req.ExtraBaseConfig != nil {
+			// 确定额外的host类型
+			var extraHost string
+			if client.Host == "tth5" {
+				extraHost = "tt"
+			} else if client.Host == "ksh5" {
+				extraHost = "ks"
+			}
+
+			if extraHost != "" {
+				// 创建额外的客户端
+				extraClient, err = s.createExtraClient(ctx.DB, client.Brand.ID, extraHost)
+				if err != nil {
+					return fmt.Errorf("failed to create extra client: %v", err)
+				}
+
+				// 创建额外的基础配置
+				extraBaseConfig, err = s.createBaseConfig(ctx.DB, *req.ExtraBaseConfig, int(extraClient.ID))
+				if err != nil {
+					return fmt.Errorf("failed to create extra base config: %v", err)
+				}
+			}
+		}
+
+		// 创建小说配置（如果存在）
+		var novelConfig *models.NovelConfig
+		if req.NovelConfig != nil {
+			novelConfig, err = s.createNovelConfig(ctx.DB, *req.NovelConfig, int(client.ID))
+			if err != nil {
+				return fmt.Errorf("failed to create novel config: %v", err)
+			}
+		}
+
+		// 生成配置文件
+		if err := s.generateConfigFiles(rollbackManager, client, baseConfig, commonConfig, payConfig, uiConfig, novelConfig, extraBaseConfig); err != nil {
+			return fmt.Errorf("failed to generate config files: %v", err)
+		}
+
+		// 更新项目配置文件
+		if err := s.fileService.UpdateProjectConfigs(client.Brand.Code, client.Host, commonConfig.ScriptBase, baseConfig.AppName, rollbackManager); err != nil {
+			return fmt.Errorf("failed to update project configs: %v", err)
+		}
+
+		// 创建prebuild文件
+		if err := s.fileService.CreatePrebuildFiles(client.Brand.Code, baseConfig.AppName, client.Host, rollbackManager); err != nil {
+			return fmt.Errorf("failed to create prebuild files: %v", err)
+		}
+
+		// 创建static图片目录
+		if err := s.fileService.CreateStaticImageDirectory(client.Brand.Code, rollbackManager); err != nil {
+			return fmt.Errorf("failed to create static image directory: %v", err)
+		}
+
+		// 构建返回结果
+		result = map[string]interface{}{
+			"client_id":        client.ID,
+			"base_config_id":   baseConfig.ID,
+			"common_config_id": commonConfig.ID,
+			"pay_config_id":    payConfig.ID,
+			"ui_config_id":     uiConfig.ID,
+		}
+
+		if novelConfig != nil {
+			result["novel_config_id"] = novelConfig.ID
+		}
+
+		if extraClient != nil {
+			result["extra_client_id"] = extraClient.ID
+		}
+
+		if extraBaseConfig != nil {
+			result["extra_base_config_id"] = extraBaseConfig.ID
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
-	// 2. 验证host格式
-	if req.BasicInfo.Host != "h5" && req.BasicInfo.Host != "tth5" && req.BasicInfo.Host != "ksh5" {
-		tx.Rollback()
-		return nil, rollback(fmt.Errorf("invalid host format"))
+	return result, nil
+}
+
+// GetWebsiteConfig 获取网站完整配置
+func (s *WebsiteService) GetWebsiteConfig(clientID int) (map[string]interface{}, error) {
+	// 查询Client信息
+	var client models.Client
+	if err := s.db.Preload("Brand").First(&client, clientID).Error; err != nil {
+		return nil, err
 	}
 
-	// 3. 检查client是否已存在
-	var existingClient models.Client
-	if err := tx.Where("brand_id = ? AND host = ?", req.BasicInfo.BrandID, req.BasicInfo.Host).First(&existingClient).Error; err == nil {
-		tx.Rollback()
-		return nil, rollback(fmt.Errorf("client already exists for this brand and host"))
+	// 查询BaseConfig
+	var baseConfig models.BaseConfig
+	s.db.Where("client_id = ?", clientID).First(&baseConfig)
+
+	// 查询CommonConfig
+	var commonConfig models.CommonConfig
+	s.db.Where("client_id = ?", clientID).First(&commonConfig)
+
+	// 查询PayConfig
+	var payConfig models.PayConfig
+	s.db.Where("client_id = ?", clientID).First(&payConfig)
+
+	// 查询UIConfig
+	var uiConfig models.UIConfig
+	s.db.Where("client_id = ?", clientID).First(&uiConfig)
+
+	// 查询NovelConfig
+	var novelConfig models.NovelConfig
+	if err := s.db.Where("client_id = ?", clientID).First(&novelConfig).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// NovelConfig不存在，使用空结构
+			novelConfig = models.NovelConfig{}
+		} else {
+			return nil, err
+		}
 	}
 
-	// 4. 创建Client
-	client := models.Client{
-		BrandID: req.BasicInfo.BrandID,
-		Host:    req.BasicInfo.Host,
+	// 构建响应数据
+	response := map[string]interface{}{
+		"client": map[string]interface{}{
+			"id":         client.ID,
+			"host":       client.Host,
+			"created_at": client.CreatedAt,
+			"updated_at": client.UpdatedAt,
+			"brand": map[string]interface{}{
+				"id":   client.Brand.ID,
+				"code": client.Brand.Code,
+			},
+		},
+		"base_config":   baseConfig,
+		"common_config": commonConfig,
+		"pay_config":    payConfig,
+		"ui_config":     uiConfig,
+		"novel_config":  novelConfig,
 	}
-	if err := tx.Create(&client).Error; err != nil {
-		tx.Rollback()
-		return nil, rollback(fmt.Errorf("failed to create client: %v", err))
-	}
-	rollbackManager.AddCreatedClient(int(client.ID))
-	fmt.Printf("✅ 创建Client成功: ID=%d\n", client.ID)
 
-	// 5. 创建主BaseConfig
-	baseConfig := models.BaseConfig{
-		ClientID: client.ID,
-		Platform: req.BaseConfig.Platform,
-		AppName:  req.BaseConfig.AppName,
-		AppCode:  req.BaseConfig.AppCode,
-		Product:  req.BaseConfig.Product,
-		Customer: req.BaseConfig.Customer,
-		AppID:    req.BaseConfig.AppID,
-		Version:  req.BaseConfig.Version,
-		CL:       req.BaseConfig.CL,
-		UC:       req.BaseConfig.UC,
-	}
-	if err := tx.Create(&baseConfig).Error; err != nil {
-		tx.Rollback()
-		return nil, rollback(fmt.Errorf("failed to create base config: %v", err))
-	}
-	rollbackManager.AddCreatedBaseConfig(int(baseConfig.ID))
-	fmt.Printf("✅ 创建BaseConfig成功: ID=%d\n", baseConfig.ID)
+	return response, nil
+}
 
-	// 6. 如果需要额外的BaseConfig，创建额外的Client和BaseConfig
-	var extraClient *models.Client
-	var extraBaseConfig *models.BaseConfig
+// createClient 创建客户端
+func (s *WebsiteService) createClient(tx *gorm.DB, basicInfo BasicInfoRequest) (*models.Client, error) {
+	// 使用ClientService在事务中创建客户端
+	clientService := NewClientService()
+	return clientService.CreateClientWithTx(tx, basicInfo.BrandID, basicInfo.Host)
+}
 
-	if req.ExtraBaseConfig != nil {
-		// 确定额外的host类型
+// createBaseConfig 创建基础配置
+func (s *WebsiteService) createBaseConfig(tx *gorm.DB, baseConfigReq BaseConfigRequest, clientID int) (*models.BaseConfig, error) {
+	// 使用BaseConfigService的带事务方法
+	baseConfigService := NewBaseConfigService()
+	return baseConfigService.CreateBaseConfigFromRequestWithTx(tx, baseConfigReq, clientID)
+}
+
+// createCommonConfig 创建通用配置
+func (s *WebsiteService) createCommonConfig(tx *gorm.DB, commonConfigReq CommonConfigRequest, clientID int) (*models.CommonConfig, error) {
+	// 使用CommonConfigService的带事务方法
+	commonConfigService := NewCommonConfigService()
+	return commonConfigService.CreateCommonConfigFromRequestWithTx(tx, commonConfigReq, clientID)
+}
+
+// createPayConfig 创建支付配置
+func (s *WebsiteService) createPayConfig(tx *gorm.DB, payConfigReq PayConfigRequest, clientID int) (*models.PayConfig, error) {
+	// 使用PayConfigService的带事务方法
+	payConfigService := NewPayConfigService()
+	return payConfigService.CreatePayConfigFromRequestWithTx(tx, payConfigReq, clientID)
+}
+
+// createUIConfig 创建UI配置
+func (s *WebsiteService) createUIConfig(tx *gorm.DB, uiConfigReq UIConfigRequest, clientID int) (*models.UIConfig, error) {
+	// 使用UIConfigService的带事务方法
+	uiConfigService := NewUIConfigService()
+	return uiConfigService.CreateUIConfigFromRequestWithTx(tx, uiConfigReq, clientID)
+}
+
+// createNovelConfig 创建小说配置
+func (s *WebsiteService) createNovelConfig(tx *gorm.DB, novelConfigReq NovelConfigRequest, clientID int) (*models.NovelConfig, error) {
+	// 使用NovelConfigService的带事务方法
+	novelConfigService := NewNovelConfigService()
+	return novelConfigService.CreateNovelConfigFromRequestWithTx(tx, novelConfigReq, clientID)
+}
+
+// createExtraClient 创建额外客户端
+func (s *WebsiteService) createExtraClient(tx *gorm.DB, brandID int, extraHost string) (*models.Client, error) {
+	client := &models.Client{
+		BrandID: brandID,
+		Host:    extraHost,
+	}
+
+	if err := tx.Create(client).Error; err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+// generateConfigFiles 生成配置文件
+func (s *WebsiteService) generateConfigFiles(rollbackManager *rollback.RollbackManager, client *models.Client, baseConfig *models.BaseConfig, commonConfig *models.CommonConfig, payConfig *models.PayConfig, uiConfig *models.UIConfig, novelConfig *models.NovelConfig, extraBaseConfig *models.BaseConfig) error {
+	// 确保有品牌代码
+	if client.Brand.Code == "" {
+		return fmt.Errorf("brand code is empty for client %d", client.ID)
+	}
+
+	fmt.Printf("📁 开始生成配置文件: brand=%s, host=%s\n", client.Brand.Code, client.Host)
+
+	// 创建配置文件写入工具
+	configfileManager := utils.NewConfigFileManager()
+
+	// 创建各种配置服务实例
+	baseConfigService := NewBaseConfigService()
+	commonConfigService := NewCommonConfigService()
+	payConfigService := NewPayConfigService()
+	uiConfigService := NewUIConfigService()
+	novelConfigService := NewNovelConfigService()
+
+	// 生成主BaseConfig文件
+	formattedBaseConfig := baseConfigService.FormatBaseConfig(*baseConfig)
+	if err := configfileManager.WriteConfigToFile("base", formattedBaseConfig, client.Brand.Code, client.Host, rollbackManager); err != nil {
+		return fmt.Errorf("failed to write base config file: %v", err)
+	}
+
+	// 生成额外的BaseConfig文件（如果存在）
+	if extraBaseConfig != nil {
 		var extraHost string
 		if client.Host == "tth5" {
 			extraHost = "tt"
@@ -179,146 +362,36 @@ func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest) (map[string]in
 			extraHost = "ks"
 		}
 
-		// 创建额外的Client
-		extraClient = &models.Client{
-			BrandID: brand.ID,
-			Host:    extraHost,
+		formattedExtraBaseConfig := baseConfigService.FormatBaseConfig(*extraBaseConfig)
+		if err := configfileManager.WriteConfigToFile("base", formattedExtraBaseConfig, client.Brand.Code, extraHost, rollbackManager); err != nil {
+			return fmt.Errorf("failed to write extra base config file: %v", err)
 		}
-		if err := tx.Create(extraClient).Error; err != nil {
-			tx.Rollback()
-			return nil, rollback(fmt.Errorf("failed to create extra client: %v", err))
+	}
+
+	// 写入其他配置文件
+	formattedCommonConfig := commonConfigService.FormatCommonConfig(*commonConfig)
+	if err := configfileManager.WriteConfigToFile("common", formattedCommonConfig, client.Brand.Code, client.Host, rollbackManager); err != nil {
+		return fmt.Errorf("failed to write common config file: %v", err)
+	}
+
+	formattedPayConfig := payConfigService.FormatPayConfig(*payConfig)
+	if err := configfileManager.WriteConfigToFile("pay", formattedPayConfig, client.Brand.Code, client.Host, rollbackManager); err != nil {
+		return fmt.Errorf("failed to write pay config file: %v", err)
+	}
+
+	formattedUIConfig := uiConfigService.FormatUIConfig(*uiConfig)
+	if err := configfileManager.WriteConfigToFile("ui", formattedUIConfig, client.Brand.Code, client.Host, rollbackManager); err != nil {
+		return fmt.Errorf("failed to write ui config file: %v", err)
+	}
+
+	// 生成NovelConfig文件（如果存在）
+	if novelConfig != nil {
+		formattedNovelConfig := novelConfigService.FormatNovelConfig(*novelConfig)
+		if err := configfileManager.WriteConfigToFile("novel", formattedNovelConfig, client.Brand.Code, client.Host, rollbackManager); err != nil {
+			return fmt.Errorf("failed to write novel config file: %v", err)
 		}
-		rollbackManager.AddCreatedExtraClient(int(extraClient.ID))
-		fmt.Printf("✅ 创建额外Client成功: ID=%d\n", extraClient.ID)
-
-		// 创建额外的BaseConfig
-		extraBaseConfig = &models.BaseConfig{
-			ClientID: extraClient.ID,
-			Platform: req.ExtraBaseConfig.Platform,
-			AppName:  req.ExtraBaseConfig.AppName,
-			AppCode:  req.ExtraBaseConfig.AppCode,
-			Product:  req.ExtraBaseConfig.Product,
-			Customer: req.ExtraBaseConfig.Customer,
-			AppID:    req.ExtraBaseConfig.AppID,
-			Version:  req.ExtraBaseConfig.Version,
-			CL:       req.ExtraBaseConfig.CL,
-			UC:       req.ExtraBaseConfig.UC,
-		}
-		if err := tx.Create(extraBaseConfig).Error; err != nil {
-			tx.Rollback()
-			return nil, rollback(fmt.Errorf("failed to create extra base config: %v", err))
-		}
-		rollbackManager.AddCreatedExtraBaseConfig(int(extraBaseConfig.ID))
-		fmt.Printf("✅ 创建额外BaseConfig成功: ID=%d\n", extraBaseConfig.ID)
 	}
 
-	// 7. 创建CommonConfig
-	commonConfig := models.CommonConfig{
-		ClientID:                client.ID,
-		DeliverBusinessIDEnable: req.CommonConfig.DeliverBusinessIDEnable,
-		DeliverBusinessID:       req.CommonConfig.DeliverBusinessID,
-		DeliverSwitchIDEnable:   req.CommonConfig.DeliverSwitchIDEnable,
-		DeliverSwitchID:         req.CommonConfig.DeliverSwitchID,
-		ProtocolCompany:         req.CommonConfig.ProtocolCompany,
-		ProtocolAbout:           req.CommonConfig.ProtocolAbout,
-		ProtocolPrivacy:         req.CommonConfig.ProtocolPrivacy,
-		ProtocolVod:             req.CommonConfig.ProtocolVod,
-		ProtocolUserCancel:      req.CommonConfig.ProtocolUserCancel,
-		ContactURL:              req.CommonConfig.ContactURL,
-		ScriptBase:              req.CommonConfig.ScriptBase,
-	}
-	if err := tx.Create(&commonConfig).Error; err != nil {
-		tx.Rollback()
-		return nil, rollback(fmt.Errorf("failed to create common config: %v", err))
-	}
-	rollbackManager.AddCreatedCommonConfig(int(commonConfig.ID))
-	fmt.Printf("✅ 创建CommonConfig成功: ID=%d\n", commonConfig.ID)
-
-	// 8. 创建PayConfig
-	payConfig := models.PayConfig{
-		ClientID:                client.ID,
-		NormalPayEnable:         req.PayConfig.NormalPayEnable,
-		NormalPayGatewayAndroid: req.PayConfig.NormalPayGatewayAndroid,
-		NormalPayGatewayIOS:     req.PayConfig.NormalPayGatewayIOS,
-		RenewPayEnable:          req.PayConfig.RenewPayEnable,
-		RenewPayGatewayAndroid:  req.PayConfig.RenewPayGatewayAndroid,
-		RenewPayGatewayIOS:      req.PayConfig.RenewPayGatewayIOS,
-	}
-	if err := tx.Create(&payConfig).Error; err != nil {
-		tx.Rollback()
-		return nil, rollback(fmt.Errorf("failed to create pay config: %v", err))
-	}
-	rollbackManager.AddCreatedPayConfig(int(payConfig.ID))
-	fmt.Printf("✅ 创建PayConfig成功: ID=%d\n", payConfig.ID)
-
-	// 9. 创建UIConfig
-	uiConfig := models.UIConfig{
-		ClientID:      client.ID,
-		ThemeBgMain:   req.UIConfig.ThemeBgMain,
-		ThemeBgSecond: req.UIConfig.ThemeBgSecond,
-		ThemeTextMain: req.UIConfig.ThemeTextMain,
-	}
-	if err := tx.Create(&uiConfig).Error; err != nil {
-		tx.Rollback()
-		return nil, rollback(fmt.Errorf("failed to create UI config: %v", err))
-	}
-	rollbackManager.AddCreatedUIConfig(int(uiConfig.ID))
-	fmt.Printf("✅ 创建UIConfig成功: ID=%d\n", uiConfig.ID)
-
-	// 10. 创建NovelConfig（如果提供）
-	var novelConfig *models.NovelConfig
-	if req.NovelConfig != nil {
-		novelConfig = &models.NovelConfig{
-			ClientID:              client.ID,
-			TTJumpHomeUrl:         req.NovelConfig.TTJumpHomeUrl,
-			TTLoginCallbackDomain: req.NovelConfig.TTLoginCallbackDomain,
-		}
-		if err := tx.Create(novelConfig).Error; err != nil {
-			tx.Rollback()
-			return nil, rollback(fmt.Errorf("failed to create novel config: %v", err))
-		}
-		rollbackManager.AddCreatedNovelConfig(int(novelConfig.ID))
-		fmt.Printf("✅ 创建NovelConfig成功: ID=%d\n", novelConfig.ID)
-	} else {
-		fmt.Printf("ℹ️ 未提供NovelConfig，跳过创建\n")
-	}
-
-	// 提交数据库事务
-	if err := tx.Commit().Error; err != nil {
-		return nil, rollback(fmt.Errorf("failed to commit transaction: %v", err))
-	}
-	fmt.Printf("✅ 数据库事务提交成功\n")
-
-	// 10. 备份项目文件
-	if err := s.fileService.BackupProjectFiles(brand.Code, rollbackManager); err != nil {
-		return nil, rollback(fmt.Errorf("failed to backup project files: %v", err))
-	}
-
-	// 11. 生成配置文件
-	if err := s.configGeneratorService.GenerateConfigFiles(brand.Code, client.Host, baseConfig, extraBaseConfig, commonConfig, payConfig, uiConfig, novelConfig, rollbackManager); err != nil {
-		return nil, rollback(fmt.Errorf("failed to generate config files: %v", err))
-	}
-
-	// 12. 更新项目配置文件
-	if err := s.fileService.UpdateProjectConfigs(brand.Code, client.Host, commonConfig.ScriptBase, baseConfig.AppName, rollbackManager); err != nil {
-		return nil, rollback(fmt.Errorf("failed to update project configs: %v", err))
-	}
-
-	// 13. 创建prebuild文件
-	if err := s.fileService.CreatePrebuildFiles(brand.Code, baseConfig.AppName, client.Host, rollbackManager); err != nil {
-		return nil, rollback(fmt.Errorf("failed to create prebuild files: %v", err))
-	}
-
-	// 14. 创建static图片目录
-	if err := s.fileService.CreateStaticImageDirectory(brand.Code, rollbackManager); err != nil {
-		return nil, rollback(fmt.Errorf("failed to create static image directory: %v", err))
-	}
-
-	fmt.Printf("✅ 网站创建完成，所有操作成功\n")
-
-	return map[string]interface{}{
-		"client_id": client.ID,
-		"brand_id":  brand.ID,
-		"host":      client.Host,
-	}, nil
+	fmt.Printf("✅ 配置文件生成完成: brand=%s, host=%s\n", client.Brand.Code, client.Host)
+	return nil
 }
