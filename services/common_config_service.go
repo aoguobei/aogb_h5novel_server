@@ -1,21 +1,31 @@
 package services
 
 import (
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+
+	"brand-config-api/config"
 	"brand-config-api/database"
 	"brand-config-api/models"
+	"brand-config-api/utils"
+	"brand-config-api/utils/rollback"
 
 	"gorm.io/gorm"
 )
 
 // CommonConfigService 通用配置服务
 type CommonConfigService struct {
-	db *gorm.DB
+	db     *gorm.DB
+	config *config.Config
 }
 
 // NewCommonConfigService 创建通用配置服务实例
 func NewCommonConfigService() *CommonConfigService {
 	return &CommonConfigService{
-		db: database.DB,
+		db:     database.DB,
+		config: config.Load(),
 	}
 }
 
@@ -31,8 +41,9 @@ func (s *CommonConfigService) CreateCommonConfig(config *models.CommonConfig) er
 	return s.db.Create(config).Error
 }
 
-// CreateCommonConfigFromRequestWithTx 从请求直接创建通用配置（在事务中）
-func (s *CommonConfigService) CreateCommonConfigFromRequestWithTx(tx *gorm.DB, commonConfigReq CommonConfigRequest, clientID int) (*models.CommonConfig, error) {
+// CreateCommonConfigWithFile 创建通用配置并生成配置文件（使用外部事务）
+func (s *CommonConfigService) CreateCommonConfigWithFile(ctx *rollback.TransactionContext, commonConfigReq CommonConfigRequest, clientID int, brandCode, host string) (*models.CommonConfig, error) {
+	// 1. 创建数据库记录
 	commonConfig := &models.CommonConfig{
 		ClientID:                clientID,
 		DeliverBusinessIDEnable: commonConfigReq.DeliverBusinessIDEnable,
@@ -48,17 +59,114 @@ func (s *CommonConfigService) CreateCommonConfigFromRequestWithTx(tx *gorm.DB, c
 		ScriptBase:              commonConfigReq.ScriptBase,
 	}
 
-	return commonConfig, tx.Create(commonConfig).Error
+	if err := ctx.DB.Create(commonConfig).Error; err != nil {
+		return nil, fmt.Errorf("failed to create common config in database: %v", err)
+	}
+
+	// 2. 生成配置文件
+	if err := s.generateConfigFile(ctx, commonConfig, brandCode, host); err != nil {
+		return nil, fmt.Errorf("failed to generate common config file: %v", err)
+	}
+
+	return commonConfig, nil
 }
 
-// UpdateCommonConfig 更新通用配置
-func (s *CommonConfigService) UpdateCommonConfig(id int, config *models.CommonConfig) error {
-	return s.db.Model(&models.CommonConfig{}).Where("id = ?", id).Updates(config).Error
+// generateConfigFile 生成通用配置文件（不管理事务）
+func (s *CommonConfigService) generateConfigFile(ctx *rollback.TransactionContext, commonConfig *models.CommonConfig, brandCode, host string) error {
+	configFile := filepath.Join(s.config.File.CommonConfigsDir, brandCode+".js")
+
+	// 检查文件是否存在，如果存在则备份
+	if _, err := os.Stat(configFile); err == nil {
+		// 文件存在，进行备份
+		if err := ctx.Files.Backup(configFile, ""); err != nil {
+			return fmt.Errorf("failed to backup file: %v", err)
+		}
+	} else if !os.IsNotExist(err) {
+		// 其他错误
+		return fmt.Errorf("failed to check file existence: %v", err)
+	}
+
+	// 读取现有配置文件或创建新的配置对象
+	configfileManager := utils.NewConfigFileManager()
+	configData, err := configfileManager.ReadConfigFile(configFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 文件不存在，创建新的配置对象
+			configData = make(map[string]interface{})
+			log.Printf("📄 配置文件不存在，创建新的配置: %s", configFile)
+		} else {
+			return fmt.Errorf("failed to read existing config file: %v", err)
+		}
+	}
+
+	// 更新指定host的配置
+	hostConfig := s.FormatCommonConfig(*commonConfig)
+	configData[host] = hostConfig
+
+	// 写入文件
+	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
+		return fmt.Errorf("failed to write config file: %v", err)
+	}
+
+	log.Printf("✅ 通用配置文件生成成功: brand=%s, host=%s", brandCode, host)
+	return nil
 }
 
-// DeleteCommonConfig 删除通用配置
-func (s *CommonConfigService) DeleteCommonConfig(id int) error {
-	return s.db.Delete(&models.CommonConfig{}, id).Error
+// DeleteCommonConfigByClientID 根据client_id删除通用配置（独立事务）
+func (s *CommonConfigService) DeleteCommonConfigByClientID(clientID int) error {
+	// 创建事务管理器
+	rollbackManager := rollback.NewRollbackManager(s.db, s.config)
+
+	return rollbackManager.ExecuteWithTransaction(func(ctx *rollback.TransactionContext) error {
+		return s.deleteCommonConfigInternal(ctx, clientID)
+	})
+}
+
+// deleteCommonConfigInternal 内部删除通用配置方法（不管理事务）
+func (s *CommonConfigService) deleteCommonConfigInternal(ctx *rollback.TransactionContext, clientID int) error {
+	// 先获取客户端和品牌信息
+	var client models.Client
+	if err := ctx.DB.Preload("Brand").Where("id = ?", clientID).First(&client).Error; err != nil {
+		return fmt.Errorf("failed to find client: %v", err)
+	}
+	brand := client.Brand
+
+	// 删除数据库记录（如果存在）
+	if err := ctx.DB.Where("client_id = ?", clientID).Delete(&models.CommonConfig{}).Error; err != nil {
+		return fmt.Errorf("failed to delete common config from database: %v", err)
+	}
+
+	// 处理配置文件
+	configFile := filepath.Join(s.config.File.CommonConfigsDir, brand.Code+".js")
+
+	// 检查文件是否存在
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		return nil
+	}
+
+	// 备份文件
+	if err := ctx.Files.Backup(configFile, ""); err != nil {
+		return fmt.Errorf("failed to backup file: %v", err)
+	}
+
+	// 读取现有配置文件
+	configfileManager := utils.NewConfigFileManager()
+	configData, err := configfileManager.ReadConfigFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read existing config file: %v", err)
+	}
+
+	// 删除指定host的配置
+	if _, exists := configData[client.Host]; exists {
+		delete(configData, client.Host)
+	}
+
+	// 写入更新后的配置文件
+	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
+		return fmt.Errorf("failed to write config file: %v", err)
+	}
+
+	return nil
 }
 
 // FormatCommonConfig 格式化通用配置
@@ -86,4 +194,91 @@ func (s *CommonConfigService) FormatCommonConfig(commonConfig models.CommonConfi
 			"base": commonConfig.ScriptBase,
 		},
 	}
+}
+
+// UpdateCommonConfigByClientID 根据client_id更新通用配置
+func (s *CommonConfigService) UpdateCommonConfigByClientID(clientID int, commonConfig models.CommonConfig) error {
+	// 创建事务管理器
+	rollbackManager := rollback.NewRollbackManager(s.db, s.config)
+
+	return rollbackManager.ExecuteWithTransaction(func(ctx *rollback.TransactionContext) error {
+		// 获取客户端信息
+		var client models.Client
+		if err := ctx.DB.Where("id = ?", clientID).First(&client).Error; err != nil {
+			return fmt.Errorf("failed to find client: %v", err)
+		}
+
+		// 获取品牌信息
+		var brand models.Brand
+		if err := ctx.DB.Where("id = ?", client.BrandID).First(&brand).Error; err != nil {
+			return fmt.Errorf("failed to find brand: %v", err)
+		}
+
+		// 添加调试信息
+		log.Printf("🔍 调试信息: clientID=%d, client.BrandID=%d, brand.Code=%s, client.Host=%s",
+			clientID, client.BrandID, brand.Code, client.Host)
+
+		log.Printf("🔄 开始更新通用配置: brand=%s, host=%s", brand.Code, client.Host)
+
+		// 验证必填字段
+		if commonConfig.DeliverBusinessIDEnable && commonConfig.DeliverBusinessID == "" {
+			return fmt.Errorf("deliver_business_id is required when deliver_business_id_enable is true")
+		}
+		if commonConfig.DeliverSwitchIDEnable && commonConfig.DeliverSwitchID == "" {
+			return fmt.Errorf("deliver_switch_id is required when deliver_switch_id_enable is true")
+		}
+
+		// 检查是否已存在通用配置记录
+		var existingCommonConfig models.CommonConfig
+		err := ctx.DB.Where("client_id = ?", clientID).First(&existingCommonConfig).Error
+
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				// 记录不存在，创建新记录
+				log.Printf("📝 通用配置记录不存在，创建新记录")
+				commonConfig.ClientID = clientID
+				if err := ctx.DB.Create(&commonConfig).Error; err != nil {
+					return fmt.Errorf("failed to create common config in database: %v", err)
+				}
+				log.Printf("✅ 数据库记录创建成功")
+			} else {
+				return fmt.Errorf("failed to check existing common config: %v", err)
+			}
+		} else {
+			// 记录存在，更新记录
+			log.Printf("📝 通用配置记录已存在，更新记录")
+			if err := ctx.DB.Model(&existingCommonConfig).Updates(commonConfig).Error; err != nil {
+				return fmt.Errorf("failed to update common config in database: %v", err)
+			}
+			log.Printf("✅ 数据库记录更新成功")
+		}
+
+		// 更新本地配置文件
+		// 构建文件路径
+		configFile := filepath.Join(s.config.File.CommonConfigsDir, brand.Code+".js")
+
+		// 备份文件
+		if err := ctx.Files.Backup(configFile, ""); err != nil {
+			return fmt.Errorf("failed to backup file: %v", err)
+		}
+
+		// 读取现有配置文件
+		configfileManager := utils.NewConfigFileManager()
+		configData, err := configfileManager.ReadConfigFile(configFile)
+		if err != nil {
+			return fmt.Errorf("failed to read existing config file: %v", err)
+		}
+
+		// 更新指定host的配置
+		hostConfig := s.FormatCommonConfig(commonConfig)
+		configData[client.Host] = hostConfig
+
+		// 写入文件
+		if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
+			return fmt.Errorf("failed to write config file: %v", err)
+		}
+
+		log.Printf("✅ 通用配置更新成功: brand=%s, host=%s", brand.Code, client.Host)
+		return nil
+	})
 }

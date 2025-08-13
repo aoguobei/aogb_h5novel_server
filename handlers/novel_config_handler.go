@@ -52,12 +52,12 @@ func (h *NovelConfigHandler) CreateNovelConfig(c *gin.Context) {
 	utils.Created(c, gin.H{"data": config}, "小说配置创建成功")
 }
 
-// UpdateNovelConfig 更新小说配置
-func (h *NovelConfigHandler) UpdateNovelConfig(c *gin.Context) {
-	id := c.Param("id")
-	configID, err := strconv.Atoi(id)
+// UpdateNovelConfigByClientID 根据client_id更新小说配置
+func (h *NovelConfigHandler) UpdateNovelConfigByClientID(c *gin.Context) {
+	clientID := c.Param("client_id")
+	clientIDInt, err := strconv.Atoi(clientID)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
@@ -67,27 +67,31 @@ func (h *NovelConfigHandler) UpdateNovelConfig(c *gin.Context) {
 		return
 	}
 
-	if err := h.novelConfigService.UpdateNovelConfig(configID, &config); err != nil {
-		utils.InternalServerError(c, "更新小说配置失败")
+	if err := h.novelConfigService.UpdateNovelConfigByClientID(clientIDInt, config); err != nil {
+		utils.InternalServerError(c, "更新小说配置失败: "+err.Error())
 		return
 	}
 
 	utils.Success(c, gin.H{"data": config}, "小说配置更新成功")
 }
 
-// DeleteNovelConfig 删除小说配置
-func (h *NovelConfigHandler) DeleteNovelConfig(c *gin.Context) {
-	id := c.Param("id")
-	configID, err := strconv.Atoi(id)
+// DeleteNovelConfigByClientID 根据client_id删除小说配置
+func (h *NovelConfigHandler) DeleteNovelConfigByClientID(c *gin.Context) {
+	clientIDStr := c.Param("client_id")
+	clientID, err := strconv.Atoi(clientIDStr)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
-	if err := h.novelConfigService.DeleteNovelConfig(configID); err != nil {
-		utils.InternalServerError(c, "删除小说配置失败")
+	err = h.novelConfigService.DeleteNovelConfigByClientID(clientID)
+	if err != nil {
+		utils.InternalServerError(c, "删除小说配置失败: "+err.Error())
 		return
 	}
 
-	utils.Success(c, nil, "小说配置删除成功")
+	utils.Success(c, gin.H{
+		"message":   "小说配置删除成功",
+		"client_id": clientID,
+	}, "小说配置删除成功")
 }

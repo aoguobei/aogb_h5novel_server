@@ -58,9 +58,9 @@ func SetupRoutes() *gin.Engine {
 			// baseConfigs.GET("/:id", baseConfigHandler.GetBaseConfigByID)
 			baseConfigs.POST("", baseConfigHandler.CreateBaseConfig)
 			// baseConfigs.PUT("/:id", baseConfigHandler.UpdateBaseConfig)
-			baseConfigs.DELETE("/:id", baseConfigHandler.DeleteBaseConfig)
 			baseConfigs.PUT("/:clientId", baseConfigHandler.UpdateBaseConfigByClientID)
 			baseConfigs.GET("/:clientId", baseConfigHandler.GetBaseConfigByClientID)
+			baseConfigs.DELETE("/client/:clientId", baseConfigHandler.DeleteBaseConfigByClientID)
 		}
 
 		// 通用配置路由
@@ -68,8 +68,9 @@ func SetupRoutes() *gin.Engine {
 		{
 			commonConfigs.GET("", commonConfigHandler.GetCommonConfigs)
 			commonConfigs.POST("", commonConfigHandler.CreateCommonConfig)
-			commonConfigs.PUT("/:id", commonConfigHandler.UpdateCommonConfig)
-			commonConfigs.DELETE("/:id", commonConfigHandler.DeleteCommonConfig)
+			// commonConfigs.PUT("/:id", commonConfigHandler.UpdateCommonConfig)
+			commonConfigs.PUT("/:client_id", commonConfigHandler.UpdateCommonConfigByClientID)
+			commonConfigs.DELETE("/client/:client_id", commonConfigHandler.DeleteCommonConfigByClientID)
 		}
 
 		// 支付配置路由
@@ -77,8 +78,9 @@ func SetupRoutes() *gin.Engine {
 		{
 			payConfigs.GET("", payConfigHandler.GetPayConfigs)
 			payConfigs.POST("", payConfigHandler.CreatePayConfig)
-			payConfigs.PUT("/:id", payConfigHandler.UpdatePayConfig)
-			payConfigs.DELETE("/:id", payConfigHandler.DeletePayConfig)
+			// payConfigs.PUT("/:id", payConfigHandler.UpdatePayConfig)
+			payConfigs.PUT("/:client_id", payConfigHandler.UpdatePayConfigByClientID)
+			payConfigs.DELETE("/client/:client_id", payConfigHandler.DeletePayConfigByClientID)
 		}
 
 		// UI配置路由
@@ -86,8 +88,9 @@ func SetupRoutes() *gin.Engine {
 		{
 			uiConfigs.GET("", uiConfigHandler.GetUIConfigs)
 			uiConfigs.POST("", uiConfigHandler.CreateUIConfig)
-			uiConfigs.PUT("/:id", uiConfigHandler.UpdateUIConfig)
-			uiConfigs.DELETE("/:id", uiConfigHandler.DeleteUIConfig)
+			// uiConfigs.PUT("/:id", uiConfigHandler.UpdateUIConfig)
+			uiConfigs.PUT("/:client_id", uiConfigHandler.UpdateUIConfigByClientID)
+			uiConfigs.DELETE("/client/:client_id", uiConfigHandler.DeleteUIConfigByClientID)
 		}
 
 		// 小说配置路由
@@ -95,8 +98,9 @@ func SetupRoutes() *gin.Engine {
 		{
 			novelConfigs.GET("", novelConfigHandler.GetNovelConfigs)
 			novelConfigs.POST("", novelConfigHandler.CreateNovelConfig)
-			novelConfigs.PUT("/:id", novelConfigHandler.UpdateNovelConfig)
-			novelConfigs.DELETE("/:id", novelConfigHandler.DeleteNovelConfig)
+			// novelConfigs.PUT("/:id", novelConfigHandler.UpdateNovelConfig)
+			novelConfigs.PUT("/:client_id", novelConfigHandler.UpdateNovelConfigByClientID)
+			novelConfigs.DELETE("/client/:client_id", novelConfigHandler.DeleteNovelConfigByClientID)
 		}
 
 		// 网站创建路由
@@ -104,6 +108,9 @@ func SetupRoutes() *gin.Engine {
 
 		// 网站配置查询路由
 		api.GET("/website-config/:clientId", websiteHandler.GetWebsiteConfig)
+
+		// 网站删除路由
+		api.DELETE("/website/:clientId", websiteHandler.DeleteWebsite)
 	}
 
 	return r

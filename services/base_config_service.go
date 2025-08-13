@@ -109,13 +109,14 @@ func (s *BaseConfigService) GetBaseConfigByID(id int) (*models.BaseConfig, error
 	return &config, nil
 }
 
-// CreateBaseConfig 创建基础配置
+// CreateBaseConfig 创建基础配置（独立事务）
 func (s *BaseConfigService) CreateBaseConfig(config *models.BaseConfig) error {
 	return s.db.Create(config).Error
 }
 
-// CreateBaseConfigFromRequestWithTx 从请求直接创建基础配置（在事务中）
-func (s *BaseConfigService) CreateBaseConfigFromRequestWithTx(tx *gorm.DB, baseConfigReq BaseConfigRequest, clientID int) (*models.BaseConfig, error) {
+// CreateBaseConfigWithFile 创建基础配置并生成配置文件（使用外部事务）
+func (s *BaseConfigService) CreateBaseConfigWithFile(ctx *rollback.TransactionContext, baseConfigReq BaseConfigRequest, clientID int, brandCode, host string) (*models.BaseConfig, error) {
+	// 1. 创建数据库记录
 	baseConfig := &models.BaseConfig{
 		ClientID: clientID,
 		Platform: baseConfigReq.Platform,
@@ -129,17 +130,114 @@ func (s *BaseConfigService) CreateBaseConfigFromRequestWithTx(tx *gorm.DB, baseC
 		UC:       baseConfigReq.UC,
 	}
 
-	return baseConfig, tx.Create(baseConfig).Error
+	if err := ctx.DB.Create(baseConfig).Error; err != nil {
+		return nil, fmt.Errorf("failed to create base config in database: %v", err)
+	}
+
+	// 2. 生成配置文件
+	if err := s.generateConfigFile(ctx, baseConfig, brandCode, host); err != nil {
+		return nil, fmt.Errorf("failed to generate base config file: %v", err)
+	}
+
+	return baseConfig, nil
 }
 
-// UpdateBaseConfig 更新基础配置
-func (s *BaseConfigService) UpdateBaseConfig(id int, config *models.BaseConfig) error {
-	return s.db.Model(&models.BaseConfig{}).Where("id = ?", id).Updates(config).Error
+// generateConfigFile 生成基础配置文件（不管理事务）
+func (s *BaseConfigService) generateConfigFile(ctx *rollback.TransactionContext, baseConfig *models.BaseConfig, brandCode, host string) error {
+	configFile := filepath.Join(s.config.File.BaseConfigsDir, brandCode+".js")
+
+	// 检查文件是否存在，如果存在则备份
+	if _, err := os.Stat(configFile); err == nil {
+		// 文件存在，进行备份
+		if err := ctx.Files.Backup(configFile, ""); err != nil {
+			return fmt.Errorf("failed to backup file: %v", err)
+		}
+	} else if !os.IsNotExist(err) {
+		// 其他错误
+		return fmt.Errorf("failed to check file existence: %v", err)
+	}
+
+	// 读取现有配置文件或创建新的配置对象
+	configfileManager := utils.NewConfigFileManager()
+	configData, err := configfileManager.ReadConfigFile(configFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 文件不存在，创建新的配置对象
+			configData = make(map[string]interface{})
+			log.Printf("📄 配置文件不存在，创建新的配置: %s", configFile)
+		} else {
+			return fmt.Errorf("failed to read existing config file: %v", err)
+		}
+	}
+
+	// 更新指定host的配置
+	hostConfig := s.FormatBaseConfig(*baseConfig)
+	configData[host] = hostConfig
+
+	// 写入文件
+	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
+		return fmt.Errorf("failed to write config file: %v", err)
+	}
+
+	log.Printf("✅ 基础配置文件生成成功: brand=%s, host=%s", brandCode, host)
+	return nil
 }
 
-// DeleteBaseConfig 删除基础配置
-func (s *BaseConfigService) DeleteBaseConfig(id int) error {
-	return s.db.Delete(&models.BaseConfig{}, id).Error
+// DeleteBaseConfigByClientID 根据client_id删除基础配置（独立事务）
+func (s *BaseConfigService) DeleteBaseConfigByClientID(clientID int) error {
+	// 创建事务管理器
+	rollbackManager := rollback.NewRollbackManager(s.db, s.config)
+
+	return rollbackManager.ExecuteWithTransaction(func(ctx *rollback.TransactionContext) error {
+		return s.deleteBaseConfigInternal(ctx, clientID)
+	})
+}
+
+// deleteBaseConfigInternal 内部删除基础配置方法（不管理事务）
+func (s *BaseConfigService) deleteBaseConfigInternal(ctx *rollback.TransactionContext, clientID int) error {
+	// 先获取客户端和品牌信息
+	var client models.Client
+	if err := ctx.DB.Preload("Brand").Where("id = ?", clientID).First(&client).Error; err != nil {
+		return fmt.Errorf("failed to find client: %v", err)
+	}
+	brand := client.Brand
+
+	// 删除数据库记录（如果存在）
+	if err := ctx.DB.Where("client_id = ?", clientID).Delete(&models.BaseConfig{}).Error; err != nil {
+		return fmt.Errorf("failed to delete base config from database: %v", err)
+	}
+
+	// 处理配置文件
+	configFile := filepath.Join(s.config.File.BaseConfigsDir, brand.Code+".js")
+
+	// 检查文件是否存在
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		return nil
+	}
+
+	// 备份文件
+	if err := ctx.Files.Backup(configFile, ""); err != nil {
+		return fmt.Errorf("failed to backup file: %v", err)
+	}
+
+	// 读取现有配置文件
+	configfileManager := utils.NewConfigFileManager()
+	configData, err := configfileManager.ReadConfigFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read existing config file: %v", err)
+	}
+
+	// 删除指定host的配置
+	if _, exists := configData[client.Host]; exists {
+		delete(configData, client.Host)
+	}
+
+	// 写入更新后的配置文件
+	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
+		return fmt.Errorf("failed to write config file: %v", err)
+	}
+
+	return nil
 }
 
 // BaseConfigFieldUpdate 基础配置字段更新结构
@@ -182,12 +280,30 @@ func (s *BaseConfigService) UpdateBaseConfigByClientID(clientID int, baseConfig 
 			return fmt.Errorf("cl is required")
 		}
 
-		// 更新数据库记录
-		if err := ctx.DB.Model(&models.BaseConfig{}).Where("client_id = ?", clientID).Updates(baseConfig).Error; err != nil {
-			return fmt.Errorf("failed to update base config in database: %v", err)
-		}
+		// 检查是否已存在基础配置记录
+		var existingBaseConfig models.BaseConfig
+		err := ctx.DB.Where("client_id = ?", clientID).First(&existingBaseConfig).Error
 
-		fmt.Printf("💾 数据库记录更新成功\n")
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				// 记录不存在，创建新记录
+				log.Printf("📝 基础配置记录不存在，创建新记录")
+				baseConfig.ClientID = clientID
+				if err := ctx.DB.Create(&baseConfig).Error; err != nil {
+					return fmt.Errorf("failed to create base config in database: %v", err)
+				}
+				log.Printf("✅ 数据库记录创建成功")
+			} else {
+				return fmt.Errorf("failed to check existing base config: %v", err)
+			}
+		} else {
+			// 记录存在，更新记录
+			log.Printf("📝 基础配置记录已存在，更新记录")
+			if err := ctx.DB.Model(&existingBaseConfig).Updates(baseConfig).Error; err != nil {
+				return fmt.Errorf("failed to update base config in database: %v", err)
+			}
+			log.Printf("✅ 数据库记录更新成功")
+		}
 
 		// 更新本地配置文件
 		// 构建文件路径

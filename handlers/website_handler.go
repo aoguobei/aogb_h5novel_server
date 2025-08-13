@@ -65,3 +65,24 @@ func (h *WebsiteHandler) GetWebsiteConfig(c *gin.Context) {
 		"data":    config,
 	}, "获取网站配置成功")
 }
+
+// DeleteWebsite 删除网站
+func (h *WebsiteHandler) DeleteWebsite(c *gin.Context) {
+	clientIDStr := c.Param("clientId")
+	clientID, err := strconv.Atoi(clientIDStr)
+	if err != nil {
+		utils.BadRequest(c, "无效的客户端ID")
+		return
+	}
+
+	err = h.websiteService.DeleteWebsite(clientID)
+	if err != nil {
+		utils.InternalServerError(c, "删除网站失败: "+err.Error())
+		return
+	}
+
+	utils.Success(c, gin.H{
+		"message":   "网站删除成功",
+		"client_id": clientID,
+	}, "网站删除成功")
+}

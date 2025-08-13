@@ -24,14 +24,26 @@ func NewClientService() *ClientService {
 // GetAllClients 获取所有客户端
 func (s *ClientService) GetAllClients() ([]models.Client, error) {
 	var clients []models.Client
-	err := s.db.Preload("Brand").Find(&clients).Error
+	err := s.db.Preload("Brand").
+		Preload("BaseConfigs").
+		Preload("CommonConfigs").
+		Preload("PayConfigs").
+		Preload("UIConfigs").
+		Preload("NovelConfigs").
+		Find(&clients).Error
 	return clients, err
 }
 
 // GetClientByID 根据ID获取客户端
 func (s *ClientService) GetClientByID(id int) (*models.Client, error) {
 	var client models.Client
-	err := s.db.Preload("Brand").First(&client, id).Error
+	err := s.db.Preload("Brand").
+		Preload("BaseConfigs").
+		Preload("CommonConfigs").
+		Preload("PayConfigs").
+		Preload("UIConfigs").
+		Preload("NovelConfigs").
+		First(&client, id).Error
 	if err != nil {
 		return nil, err
 	}

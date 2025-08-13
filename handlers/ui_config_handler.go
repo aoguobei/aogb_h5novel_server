@@ -52,12 +52,12 @@ func (h *UIConfigHandler) CreateUIConfig(c *gin.Context) {
 	utils.Created(c, gin.H{"data": config}, "UI配置创建成功")
 }
 
-// UpdateUIConfig 更新UI配置
-func (h *UIConfigHandler) UpdateUIConfig(c *gin.Context) {
-	id := c.Param("id")
-	configID, err := strconv.Atoi(id)
+// UpdateUIConfigByClientID 根据client_id更新UI配置
+func (h *UIConfigHandler) UpdateUIConfigByClientID(c *gin.Context) {
+	clientID := c.Param("client_id")
+	clientIDInt, err := strconv.Atoi(clientID)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
@@ -67,27 +67,31 @@ func (h *UIConfigHandler) UpdateUIConfig(c *gin.Context) {
 		return
 	}
 
-	if err := h.uiConfigService.UpdateUIConfig(configID, &config); err != nil {
-		utils.InternalServerError(c, "更新UI配置失败")
+	if err := h.uiConfigService.UpdateUIConfigByClientID(clientIDInt, config); err != nil {
+		utils.InternalServerError(c, "更新UI配置失败: "+err.Error())
 		return
 	}
 
 	utils.Success(c, gin.H{"data": config}, "UI配置更新成功")
 }
 
-// DeleteUIConfig 删除UI配置
-func (h *UIConfigHandler) DeleteUIConfig(c *gin.Context) {
-	id := c.Param("id")
-	configID, err := strconv.Atoi(id)
+// DeleteUIConfigByClientID 根据client_id删除UI配置
+func (h *UIConfigHandler) DeleteUIConfigByClientID(c *gin.Context) {
+	clientIDStr := c.Param("client_id")
+	clientID, err := strconv.Atoi(clientIDStr)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
-	if err := h.uiConfigService.DeleteUIConfig(configID); err != nil {
-		utils.InternalServerError(c, "删除UI配置失败")
+	err = h.uiConfigService.DeleteUIConfigByClientID(clientID)
+	if err != nil {
+		utils.InternalServerError(c, "删除UI配置失败: "+err.Error())
 		return
 	}
 
-	utils.Success(c, nil, "UI配置删除成功")
+	utils.Success(c, gin.H{
+		"message":   "UI配置删除成功",
+		"client_id": clientID,
+	}, "UI配置删除成功")
 }

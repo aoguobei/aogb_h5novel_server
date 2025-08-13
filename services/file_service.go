@@ -2,29 +2,34 @@ package services
 
 import (
 	"fmt"
-	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"brand-config-api/config"
+	"brand-config-api/utils"
 	"brand-config-api/utils/rollback"
 )
 
 // FileService 文件操作服务
 type FileService struct {
-	config *config.Config
+	config    *config.Config
+	fileUtils *utils.FileUtils // 保留对FileUtils的引用
+	jsonUtils *utils.JSONUtils
 }
 
 // NewFileService 创建文件操作服务实例
 func NewFileService() *FileService {
 	return &FileService{
-		config: config.Load(),
+		config:    config.Load(),
+		fileUtils: utils.NewFileUtils(), // 初始化fileUtils
+		jsonUtils: utils.NewJSONUtils(), // 初始化jsonUtils
 	}
 }
 
 // UpdateProjectConfigs 更新项目配置文件
-func (s *FileService) UpdateProjectConfigs(brandCode, host string, scriptBase string, appName string, rollbackManager *rollback.RollbackManager) error {
+func (s *FileService) UpdateProjectConfigs(brandCode, host string, scriptBase string, appName string, fileManager *rollback.FileRollback) error {
 	// 注意：_host.js 只在新建品牌时更新，不在新建网站时更新
 	// 所以这里不调用 updateHostFileForBrand
 
@@ -47,7 +52,7 @@ func (s *FileService) UpdateProjectConfigs(brandCode, host string, scriptBase st
 }
 
 // CreatePrebuildFiles 创建prebuild文件
-func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host string, rollbackManager *rollback.RollbackManager) error {
+func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host string, fileManager *rollback.FileRollback) error {
 	brandDir := s.config.GetPrebuildPath(brandCode)
 
 	// 确保品牌目录存在
@@ -153,7 +158,7 @@ func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host
 }
 
 // CreateStaticImageDirectory 创建static图片目录
-func (s *FileService) CreateStaticImageDirectory(brandCode string, rollbackManager *rollback.RollbackManager) error {
+func (s *FileService) CreateStaticImageDirectory(brandCode string, fileManager *rollback.FileRollback) error {
 	sourceDir := filepath.Join(s.config.File.StaticDir, "img-jinse")
 	targetDir := s.config.GetStaticPath(brandCode)
 
@@ -173,7 +178,7 @@ func (s *FileService) CreateStaticImageDirectory(brandCode string, rollbackManag
 	}
 
 	// 拷贝目录内容
-	if err := s.copyDirectory(sourceDir, targetDir); err != nil {
+	if err := s.fileUtils.CopyDirectory(sourceDir, targetDir); err != nil {
 		return fmt.Errorf("failed to copy directory content: %v", err)
 	}
 
@@ -241,12 +246,12 @@ func (s *FileService) updatePackageJSONFile(brandCode, host string, appName stri
 	}
 
 	// 1. 添加scripts - 在scripts块的末尾添加
-	scriptsEndIndex := s.findScriptsEndIndex(contentStr)
+	scriptsEndIndex := s.jsonUtils.FindScriptsEndIndex(contentStr)
 	if scriptsEndIndex > 0 {
 		fmt.Printf("🔍 Found scripts block end position: %d\n", scriptsEndIndex)
 
 		// 找到scripts块中最后一个脚本的结束位置
-		lastScriptEndIndex := s.findLastScriptEndIndex(contentStr, scriptsEndIndex)
+		lastScriptEndIndex := s.jsonUtils.FindLastScriptEndIndex(contentStr, scriptsEndIndex)
 		if lastScriptEndIndex > 0 {
 			fmt.Printf("🔍 Found last script end position: %d\n", lastScriptEndIndex)
 
@@ -269,12 +274,12 @@ func (s *FileService) updatePackageJSONFile(brandCode, host string, appName stri
 	}
 
 	// 2. 添加uni-app.scripts - 在uni-app.scripts块的末尾添加
-	uniAppScriptsEndIndex := s.findUniAppScriptsEndIndex(contentStr)
+	uniAppScriptsEndIndex := s.jsonUtils.FindUniAppScriptsEndIndex(contentStr)
 	if uniAppScriptsEndIndex > 0 {
 		fmt.Printf("🔍 Found uni-app.scripts block end position: %d\n", uniAppScriptsEndIndex)
 
 		// 找到uni-app.scripts块中最后一个配置的结束位置
-		lastUniAppScriptEndIndex := s.findLastUniAppScriptEndIndex(contentStr, uniAppScriptsEndIndex)
+		lastUniAppScriptEndIndex := s.jsonUtils.FindLastUniAppScriptEndIndex(contentStr, uniAppScriptsEndIndex)
 		if lastUniAppScriptEndIndex > 0 {
 			fmt.Printf("🔍 Found last uni-app script end position: %d\n", lastUniAppScriptEndIndex)
 
@@ -285,7 +290,7 @@ func (s *FileService) updatePackageJSONFile(brandCode, host string, appName stri
         "UNI_PLATFORM": "%s"
       },
       "define": {
-        "MP-%s": true`, platformKey, s.getUniPlatform(host), strings.ToUpper(brandCode))
+        "MP-%s": true`, platformKey, s.fileUtils.GetUniPlatform(host), strings.ToUpper(brandCode))
 
 			// 根据host类型设置对应的平台宏
 			switch host {
@@ -324,71 +329,6 @@ func (s *FileService) updatePackageJSONFile(brandCode, host string, appName stri
 
 	fmt.Printf("✅ Updated package.json for brand %s with host %s\n", brandCode, host)
 	return nil
-}
-
-// getUniPlatform 根据host获取对应的uni平台标识
-func (s *FileService) getUniPlatform(host string) string {
-	switch host {
-	case "tt":
-		return "mp-toutiao"
-	case "ks":
-		return "mp-kuaishou"
-	case "wx":
-		return "mp-weixin"
-	case "bd":
-		return "mp-baidu"
-	default:
-		return "h5"
-	}
-}
-
-// copyDirectory 递归拷贝目录内容
-func (s *FileService) copyDirectory(src, dst string) error {
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-
-		if entry.IsDir() {
-			// 创建子目录
-			if err := os.MkdirAll(dstPath, 0755); err != nil {
-				return err
-			}
-			// 递归拷贝子目录
-			if err := s.copyDirectory(srcPath, dstPath); err != nil {
-				return err
-			}
-		} else {
-			// 拷贝文件
-			if err := s.copyFile(srcPath, dstPath); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-// copyFile 拷贝单个文件
-func (s *FileService) copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
 }
 
 // UpdateHostFileForBrand 更新 _host.js 文件，添加新的 brand
@@ -518,132 +458,615 @@ func (s *FileService) updateIndexFileForBrand(brandCode string) error {
 	return nil
 }
 
-// findScriptsEndIndex 找到scripts块的结束位置
-func (s *FileService) findScriptsEndIndex(content string) int {
-	// 查找 "scripts": { 的开始位置
-	scriptsStart := strings.Index(content, `"scripts": {`)
-	if scriptsStart == -1 {
-		return -1
+// RemoveProjectConfigs 删除项目配置文件中的相关配置
+func (s *FileService) RemoveProjectConfigs(brandCode, host string, fileManager *rollback.FileRollback) error {
+	log.Printf("🗑️ 开始删除项目配置文件: brand=%s, host=%s", brandCode, host)
+
+	// 1. 删除vite.config.js中的配置
+	if err := s.removeViteConfigEntry(brandCode, host, fileManager); err != nil {
+		return fmt.Errorf("failed to remove vite config entry: %v", err)
 	}
 
-	// 从scripts开始位置向后查找对应的结束大括号
-	braceCount := 0
+	// 2. 删除package.json中的配置
+	if err := s.removePackageJSONEntries(brandCode, host, fileManager); err != nil {
+		return fmt.Errorf("failed to remove package.json entries: %v", err)
+	}
 
-	for i := scriptsStart; i < len(content); i++ {
+	// 3. 删除prebuild目录下的pages-host.json文件
+	if err := s.removePrebuildPagesFile(brandCode, host, fileManager); err != nil {
+		return fmt.Errorf("failed to remove prebuild pages file: %v", err)
+	}
+
+	log.Printf("✅ 项目配置文件删除完成: brand=%s, host=%s", brandCode, host)
+	return nil
+}
+
+// removeViteConfigEntry 删除vite.config.js中的配置条目
+func (s *FileService) removeViteConfigEntry(brandCode, host string, fileManager *rollback.FileRollback) error {
+	content, err := os.ReadFile(s.config.File.ViteConfigFile)
+	if err != nil {
+		return fmt.Errorf("failed to read vite.config.js: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// 生成要删除的配置键
+	scriptKey := fmt.Sprintf("'%s-%s'", host, brandCode)
+
+	// 检查是否存在该配置
+	if !strings.Contains(contentStr, scriptKey) {
+		log.Printf("⚠️ vite.config.js中不存在配置: %s", scriptKey)
+		return nil
+	}
+
+	// 备份文件
+	if err := fileManager.Backup(s.config.File.ViteConfigFile, ""); err != nil {
+		return fmt.Errorf("failed to backup vite.config.js: %v", err)
+	}
+
+	// 找到并删除配置行
+	lines := strings.Split(contentStr, "\n")
+	var newLines []string
+
+	for _, line := range lines {
+		if strings.Contains(line, scriptKey) {
+			// 删除包含配置键的行
+			log.Printf("🗑️ 删除vite.config.js配置行: %s", strings.TrimSpace(line))
+			continue
+		}
+
+		newLines = append(newLines, line)
+	}
+
+	// 写回文件
+	newContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(s.config.File.ViteConfigFile, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write vite.config.js: %v", err)
+	}
+
+	log.Printf("✅ 删除vite.config.js配置成功: %s", scriptKey)
+	return nil
+}
+
+// removePackageJSONEntries 删除package.json中的配置条目
+func (s *FileService) removePackageJSONEntries(brandCode, host string, fileManager *rollback.FileRollback) error {
+	content, err := os.ReadFile(s.config.File.PackageFile)
+	if err != nil {
+		return fmt.Errorf("failed to read package.json: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// 生成平台标识
+	platformKey := fmt.Sprintf("%s-%s", host, brandCode)
+
+	// 检查是否存在该配置
+	if !strings.Contains(contentStr, fmt.Sprintf(`"dev:%s"`, platformKey)) {
+		log.Printf("⚠️ package.json中不存在配置: %s", platformKey)
+		return nil
+	}
+
+	// 备份文件
+	if err := fileManager.Backup(s.config.File.PackageFile, ""); err != nil {
+		return fmt.Errorf("failed to backup package.json: %v", err)
+	}
+
+	// 删除scripts中的配置
+	contentStr = s.jsonUtils.RemoveScriptsEntry(contentStr, platformKey)
+
+	// 删除uni-app.scripts中的配置
+	contentStr = s.jsonUtils.RemoveUniAppScriptsEntry(contentStr, platformKey)
+
+	// 写回文件
+	if err := os.WriteFile(s.config.File.PackageFile, []byte(contentStr), 0644); err != nil {
+		return fmt.Errorf("failed to write package.json: %v", err)
+	}
+
+	log.Printf("✅ 删除package.json配置成功: %s", platformKey)
+	return nil
+}
+
+// removePrebuildPagesFile 删除prebuild目录下的pages-host.json文件
+func (s *FileService) removePrebuildPagesFile(brandCode, host string, fileManager *rollback.FileRollback) error {
+	pagesFile := filepath.Join(s.config.File.PrebuildDir, brandCode, fmt.Sprintf("pages-%s.json", host))
+
+	// 检查文件是否存在
+	if _, err := os.Stat(pagesFile); os.IsNotExist(err) {
+		log.Printf("⚠️ prebuild pages文件不存在: %s", pagesFile)
+		return nil
+	}
+
+	// 备份文件
+	if err := fileManager.Backup(pagesFile, ""); err != nil {
+		return fmt.Errorf("failed to backup pages file: %v", err)
+	}
+
+	// 删除文件
+	if err := os.Remove(pagesFile); err != nil {
+		return fmt.Errorf("failed to delete pages file: %v", err)
+	}
+
+	log.Printf("✅ 删除prebuild pages文件成功: %s", pagesFile)
+	return nil
+}
+
+// removeNovelConfigEntries 删除novelconfig.js中对应品牌的host配置
+func (s *FileService) removeNovelConfigEntries(brandCode, host string, fileManager *rollback.FileRollback) error {
+	novelConfigFile := filepath.Join(s.config.File.LocalConfigsDir, "novelConfig.js")
+
+	// 检查文件是否存在
+	if _, err := os.Stat(novelConfigFile); os.IsNotExist(err) {
+		log.Printf("⚠️ novelconfig.js文件不存在: %s", novelConfigFile)
+		return nil
+	}
+
+	content, err := os.ReadFile(novelConfigFile)
+	if err != nil {
+		return fmt.Errorf("failed to read novelconfig.js: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// 检查是否存在该品牌的配置
+	if !strings.Contains(contentStr, fmt.Sprintf(`"%s": {`, brandCode)) {
+		log.Printf("⚠️ novelconfig.js中不存在品牌配置: %s", brandCode)
+		return nil
+	}
+
+	// 文件已在 WebsiteService 中预先备份，这里直接进行修改
+	log.Printf("🔄 准备修改 novelconfig.js: %s", novelConfigFile)
+
+	// 删除该品牌下对应host的配置
+	// 如果删除的是tth5或ksh5，同时删除对应的tt或ks配置
+	var hostsToDelete []string
+	hostsToDelete = append(hostsToDelete, host)
+
+	if host == "tth5" {
+		hostsToDelete = append(hostsToDelete, "tt")
+	} else if host == "ksh5" {
+		hostsToDelete = append(hostsToDelete, "ks")
+	}
+
+	log.Printf("🗑️ 准备删除 novelconfig.js 中的配置: brand=%s, hosts=%v", brandCode, hostsToDelete)
+
+	// 删除每个host的配置
+	for _, hostToDelete := range hostsToDelete {
+		contentStr = s.removeNovelConfigHostEntry(contentStr, brandCode, hostToDelete)
+	}
+
+	// 写回文件
+	log.Printf("📝 准备写回 novelconfig.js")
+	if err := os.WriteFile(novelConfigFile, []byte(contentStr), 0644); err != nil {
+		return fmt.Errorf("failed to write novelconfig.js: %v", err)
+	}
+	log.Printf("✅ novelconfig.js 写回完成")
+
+	log.Printf("✅ 删除novelconfig.js配置成功: brand=%s, hosts=%v", brandCode, hostsToDelete)
+	return nil
+}
+
+// removeNovelConfigHostEntry 删除novelconfig.js中指定品牌的指定host配置
+func (s *FileService) removeNovelConfigHostEntry(content, brandCode, host string) string {
+	log.Printf("🔍 开始删除 novelconfig.js 中的配置: brand=%s, host=%s", brandCode, host)
+
+	// 查找品牌配置块
+	brandPattern := fmt.Sprintf(`"%s": {`, brandCode)
+	brandStart := strings.Index(content, brandPattern)
+	if brandStart == -1 {
+		log.Printf("⚠️ 未找到品牌配置块: %s", brandCode)
+		return content
+	}
+	log.Printf("✅ 找到品牌配置块: %s, 位置: %d", brandCode, brandStart)
+
+	// 找到品牌配置块的结束位置
+	brandEnd := findBrandConfigEnd(content, brandStart)
+	if brandEnd == -1 {
+		log.Printf("⚠️ 未找到品牌配置块结束位置: %s", brandCode)
+		return content
+	}
+	log.Printf("✅ 找到品牌配置块结束位置: %d", brandEnd)
+
+	// 在品牌配置块中查找host配置
+	hostPattern := fmt.Sprintf(`"%s": {`, host)
+	hostStart := strings.Index(content[brandStart:brandEnd], hostPattern)
+	if hostStart == -1 {
+		log.Printf("⚠️ 未找到host配置: %s", host)
+		return content
+	}
+	hostStart += brandStart
+	log.Printf("✅ 找到host配置: %s, 位置: %d", host, hostStart)
+
+	// 找到host配置的结束位置
+	hostEnd := findHostConfigEnd(content, hostStart)
+	if hostEnd == -1 {
+		log.Printf("⚠️ 未找到host配置结束位置: %s", host)
+		return content
+	}
+	log.Printf("✅ 找到host配置结束位置: %d", hostEnd)
+
+	// 删除host配置
+	newContent := content[:hostStart] + content[hostEnd:]
+	log.Printf("🗑️ 删除host配置: %s (从位置 %d 到 %d)", host, hostStart, hostEnd)
+
+	// 清理多余的逗号
+	newContent = cleanNovelConfigCommas(newContent)
+	log.Printf("✅ host配置删除完成: %s", host)
+
+	return newContent
+}
+
+// findBrandConfigEnd 找到品牌配置块的结束位置
+func findBrandConfigEnd(content string, startIndex int) int {
+	braceCount := 0
+	for i := startIndex; i < len(content); i++ {
 		if content[i] == '{' {
 			braceCount++
 		} else if content[i] == '}' {
 			braceCount--
 			if braceCount == 0 {
-				return i
+				return i + 1
 			}
 		}
 	}
-
 	return -1
 }
 
-// findLastScriptEndIndex 找到scripts块中最后一个脚本的结束位置
-func (s *FileService) findLastScriptEndIndex(content string, scriptsEndIndex int) int {
-	// 从scripts块开始位置向后查找
-	scriptsStart := strings.Index(content, `"scripts": {`)
-	if scriptsStart == -1 {
-		return -1
-	}
-
-	// 在scripts块中查找最后一个脚本的结束位置
-	// 从scripts结束位置向前查找最后一个脚本的结束引号
-	for i := scriptsEndIndex - 1; i > scriptsStart; i-- {
-		// 查找最后一个脚本的结束引号
-		if content[i] == '"' {
-			// 向前查找这个脚本的开始引号
-			for j := i - 1; j > scriptsStart; j-- {
-				if content[j] == '"' {
-					// 找到了脚本值的开始引号，现在需要找到这个值的结束引号
-					// 从开始引号向后查找结束引号
-					for k := j + 1; k < scriptsEndIndex; k++ {
-						if content[k] == '"' {
-							// 找到了值的结束引号，返回这个位置
-							return k + 1
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return -1
-}
-
-// findUniAppScriptsEndIndex 找到uni-app.scripts块的结束位置
-func (s *FileService) findUniAppScriptsEndIndex(content string) int {
-	// 查找 "uni-app": { 的开始位置
-	uniAppStart := strings.Index(content, `"uni-app": {`)
-	if uniAppStart == -1 {
-		return -1
-	}
-
-	// 从uni-app开始位置向后查找 "scripts": { 的开始位置
-	scriptsStart := strings.Index(content[uniAppStart:], `"scripts": {`)
-	if scriptsStart == -1 {
-		return -1
-	}
-
-	scriptsStart += uniAppStart
-
-	// 从scripts开始位置向后查找对应的结束大括号
+// findHostConfigEnd 找到host配置的结束位置
+func findHostConfigEnd(content string, startIndex int) int {
 	braceCount := 0
-
-	for i := scriptsStart; i < len(content); i++ {
+	for i := startIndex; i < len(content); i++ {
 		if content[i] == '{' {
 			braceCount++
 		} else if content[i] == '}' {
 			braceCount--
 			if braceCount == 0 {
-				return i
+				return i + 1
 			}
 		}
 	}
-
 	return -1
 }
 
-// findLastUniAppScriptEndIndex 找到uni-app.scripts块中最后一个配置的结束位置
-func (s *FileService) findLastUniAppScriptEndIndex(content string, uniAppScriptsEndIndex int) int {
-	// 从uni-app.scripts块开始位置向后查找
-	uniAppStart := strings.Index(content, `"uni-app": {`)
-	if uniAppStart == -1 {
-		return -1
+// cleanNovelConfigCommas 清理novelconfig.js中的多余逗号
+func cleanNovelConfigCommas(content string) string {
+	// 清理连续逗号
+	content = strings.ReplaceAll(content, ",,", ",")
+
+	// 清理逗号后的大括号
+	content = strings.ReplaceAll(content, ",}", "}")
+
+	// 清理逗号后的方括号
+	content = strings.ReplaceAll(content, ",]", "]")
+
+	return content
+}
+
+// removeNovelConfigBrandBlock 删除novelconfig.js中该品牌的整个配置块
+func (s *FileService) removeNovelConfigBrandBlock(brandCode string, fileManager *rollback.FileRollback) error {
+	novelConfigFile := filepath.Join(s.config.File.LocalConfigsDir, "novelConfig.js")
+
+	// 检查文件是否存在
+	if _, err := os.Stat(novelConfigFile); os.IsNotExist(err) {
+		log.Printf("⚠️ novelconfig.js文件不存在: %s", novelConfigFile)
+		return nil
 	}
 
-	// 从uni-app开始位置向后查找 "scripts": { 的开始位置
-	scriptsStart := strings.Index(content[uniAppStart:], `"scripts": {`)
-	if scriptsStart == -1 {
-		return -1
+	content, err := os.ReadFile(novelConfigFile)
+	if err != nil {
+		return fmt.Errorf("failed to read novelconfig.js: %v", err)
 	}
 
-	scriptsStart += uniAppStart
+	contentStr := string(content)
 
-	// 在uni-app.scripts块中查找最后一个配置的结束位置
-	// 从scripts结束位置向前查找最后一个配置的结束大括号
-	for i := uniAppScriptsEndIndex - 1; i > scriptsStart; i-- {
-		// 查找最后一个配置的结束大括号
-		if content[i] == '}' {
-			// 向前查找这个配置的开始大括号
-			braceCount := 1
-			for j := i - 1; j > scriptsStart; j-- {
-				if content[j] == '}' {
-					braceCount++
-				} else if content[j] == '{' {
-					braceCount--
-					if braceCount == 0 {
-						// 找到了配置的开始大括号，返回结束大括号后的位置
-						return i + 1
-					}
-				}
-			}
+	// 检查是否存在该品牌的配置
+	brandPattern := fmt.Sprintf(`"%s": {`, brandCode)
+	if !strings.Contains(contentStr, brandPattern) {
+		log.Printf("⚠️ novelconfig.js中不存在品牌配置: %s", brandCode)
+		return nil
+	}
+
+	// 备份文件
+	if err := fileManager.Backup(novelConfigFile, ""); err != nil {
+		return fmt.Errorf("failed to backup novelconfig.js: %v", err)
+	}
+
+	// 删除该品牌的整个配置块
+	brandStart := strings.Index(contentStr, brandPattern)
+	if brandStart == -1 {
+		return nil
+	}
+
+	// 找到品牌配置块的结束位置
+	brandEnd := findBrandConfigEnd(contentStr, brandStart)
+	if brandEnd == -1 {
+		return nil
+	}
+
+	// 删除品牌配置块
+	newContent := contentStr[:brandStart] + contentStr[brandEnd:]
+
+	// 清理多余的逗号
+	newContent = cleanNovelConfigCommas(newContent)
+
+	// 写回文件
+	if err := os.WriteFile(novelConfigFile, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write novelconfig.js: %v", err)
+	}
+
+	log.Printf("✅ 删除novelconfig.js品牌配置块成功: %s", brandCode)
+	return nil
+}
+
+// RemoveBrandFiles 删除品牌相关的所有文件
+func (s *FileService) RemoveBrandFiles(brandCode, host string, fileManager *rollback.FileRollback) error {
+	log.Printf("🗑️ 开始删除品牌相关文件: %s, host: %s", brandCode, host)
+
+	// 1. 删除prebuild目录下对应的host子目录
+	if err := s.removePrebuildHostDir(brandCode, host, fileManager); err != nil {
+		return fmt.Errorf("failed to remove prebuild host directory: %v", err)
+	}
+
+	// 2. 删除各个配置目录下的 brandCode.js 文件
+	if err := s.removeConfigFiles(brandCode, fileManager); err != nil {
+		return fmt.Errorf("failed to remove config files: %v", err)
+	}
+
+	// 3. 删除prebuild目录下的 brandCode 目录
+	if err := s.removePrebuildBrandDir(brandCode, fileManager); err != nil {
+		return fmt.Errorf("failed to remove prebuild brand directory: %v", err)
+	}
+
+	// 4. 删除static图片目录（如果为空）
+	if err := s.removeStaticImageDir(brandCode, fileManager); err != nil {
+		log.Printf("⚠️ 删除static图片目录失败（可能不为空）: %v", err)
+	}
+
+	// 5. 删除index.js中该品牌的配置
+	if err := s.removeIndexFileBrandConfig(brandCode, fileManager); err != nil {
+		return fmt.Errorf("failed to remove index.js brand config: %v", err)
+	}
+
+	// 6. 删除_host.js中该品牌的配置
+	if err := s.removeHostFileBrandConfig(brandCode, fileManager); err != nil {
+		return fmt.Errorf("failed to remove _host.js brand config: %v", err)
+	}
+
+	// 7. 删除novelconfig.js中该品牌的整个配置块
+	if err := s.removeNovelConfigBrandBlock(brandCode, fileManager); err != nil {
+		return fmt.Errorf("failed to remove novelconfig.js brand block: %v", err)
+	}
+
+	log.Printf("✅ 品牌相关文件删除完成: %s", brandCode)
+	return nil
+}
+
+// removeConfigFiles 删除各个配置目录下的 brandCode.js 文件
+func (s *FileService) removeConfigFiles(brandCode string, fileManager *rollback.FileRollback) error {
+	configFiles := []string{
+		filepath.Join(s.config.File.BaseConfigsDir, brandCode+".js"),
+		filepath.Join(s.config.File.CommonConfigsDir, brandCode+".js"),
+		filepath.Join(s.config.File.PayConfigsDir, brandCode+".js"),
+		filepath.Join(s.config.File.UIConfigsDir, brandCode+".js"),
+	}
+
+	for _, configFile := range configFiles {
+		if err := s.removeFileIfExists(configFile, fileManager); err != nil {
+			return fmt.Errorf("failed to remove config file %s: %v", configFile, err)
 		}
 	}
 
-	return -1
+	return nil
+}
+
+// removePrebuildBrandDir 删除prebuild目录下的 brandCode 目录
+func (s *FileService) removePrebuildBrandDir(brandCode string, fileManager *rollback.FileRollback) error {
+	brandDir := filepath.Join(s.config.File.PrebuildDir, brandCode)
+
+	if _, err := os.Stat(brandDir); os.IsNotExist(err) {
+		log.Printf("⚠️ prebuild品牌目录不存在: %s", brandDir)
+		return nil
+	}
+
+	// 备份目录
+	if err := fileManager.Backup(brandDir, ""); err != nil {
+		return fmt.Errorf("failed to backup brand directory: %v", err)
+	}
+
+	// 删除目录
+	if err := os.RemoveAll(brandDir); err != nil {
+		return fmt.Errorf("failed to delete brand directory: %v", err)
+	}
+
+	log.Printf("✅ 删除prebuild品牌目录成功: %s", brandDir)
+	return nil
+}
+
+// removePrebuildHostDir 删除prebuild目录下对应的host子目录
+func (s *FileService) removePrebuildHostDir(brandCode, host string, fileManager *rollback.FileRollback) error {
+	hostDir := filepath.Join(s.config.File.PrebuildDir, brandCode, host)
+
+	if _, err := os.Stat(hostDir); os.IsNotExist(err) {
+		log.Printf("⚠️ prebuild host目录不存在: %s", hostDir)
+		return nil
+	}
+
+	// 备份目录
+	if err := fileManager.Backup(hostDir, ""); err != nil {
+		return fmt.Errorf("failed to backup host directory: %v", err)
+	}
+
+	// 删除目录
+	if err := os.RemoveAll(hostDir); err != nil {
+		return fmt.Errorf("failed to delete host directory: %v", err)
+	}
+
+	log.Printf("✅ 删除prebuild host目录成功: %s", hostDir)
+	return nil
+}
+
+// removeStaticImageDir 删除static图片目录（如果为空）
+func (s *FileService) removeStaticImageDir(brandCode string, fileManager *rollback.FileRollback) error {
+	staticImageDir := filepath.Join(s.config.File.StaticDir, "img-"+brandCode)
+
+	if _, err := os.Stat(staticImageDir); os.IsNotExist(err) {
+		log.Printf("⚠️ static图片目录不存在: %s", staticImageDir)
+		return nil
+	}
+
+	// 检查目录是否为空
+	entries, err := os.ReadDir(staticImageDir)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %v", err)
+	}
+
+	if len(entries) > 0 {
+		log.Printf("⚠️ static图片目录不为空，跳过删除: %s", staticImageDir)
+		return nil
+	}
+
+	// 备份目录
+	if err := fileManager.Backup(staticImageDir, ""); err != nil {
+		return fmt.Errorf("failed to backup static image directory: %v", err)
+	}
+
+	// 删除目录
+	if err := os.Remove(staticImageDir); err != nil {
+		return fmt.Errorf("failed to delete static image directory: %v", err)
+	}
+
+	log.Printf("✅ 删除static图片目录成功: %s", staticImageDir)
+	return nil
+}
+
+// removeIndexFileBrandConfig 删除index.js中该品牌的配置
+func (s *FileService) removeIndexFileBrandConfig(brandCode string, fileManager *rollback.FileRollback) error {
+	content, err := os.ReadFile(s.config.File.IndexFile)
+	if err != nil {
+		return fmt.Errorf("failed to read index.js: %v", err)
+	}
+
+	contentStr := string(content)
+	upperBrandCode := strings.ToUpper(brandCode)
+
+	// 检查是否存在该品牌的配置
+	if !strings.Contains(contentStr, "#ifdef MP-"+upperBrandCode) {
+		log.Printf("⚠️ index.js中不存在品牌配置: %s", brandCode)
+		return nil
+	}
+
+	// 备份文件
+	if err := fileManager.Backup(s.config.File.IndexFile, ""); err != nil {
+		return fmt.Errorf("failed to backup index.js: %v", err)
+	}
+
+	// 删除该品牌的配置块
+	lines := strings.Split(contentStr, "\n")
+	var newLines []string
+	inBrandBlock := false
+	skipLines := 0
+
+	for _, line := range lines {
+		if strings.Contains(line, "#ifdef MP-"+upperBrandCode) {
+			inBrandBlock = true
+			skipLines = 0
+			continue
+		}
+
+		if inBrandBlock {
+			if strings.Contains(line, "#endif") {
+				inBrandBlock = false
+				continue
+			}
+			skipLines++
+			continue
+		}
+
+		newLines = append(newLines, line)
+	}
+
+	// 写回文件
+	newContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(s.config.File.IndexFile, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write index.js: %v", err)
+	}
+
+	log.Printf("✅ 删除index.js品牌配置成功: %s", brandCode)
+	return nil
+}
+
+// removeHostFileBrandConfig 删除_host.js中该品牌的配置
+func (s *FileService) removeHostFileBrandConfig(brandCode string, fileManager *rollback.FileRollback) error {
+	content, err := os.ReadFile(s.config.File.HostFile)
+	if err != nil {
+		return fmt.Errorf("failed to read _host.js: %v", err)
+	}
+
+	contentStr := string(content)
+	upperBrandCode := strings.ToUpper(brandCode)
+
+	// 检查是否存在该品牌的配置
+	brandPattern := fmt.Sprintf("// #ifdef MP-%s", upperBrandCode)
+	if !strings.Contains(contentStr, brandPattern) {
+		log.Printf("⚠️ _host.js中不存在品牌配置: %s", brandCode)
+		return nil
+	}
+
+	// 备份文件
+	if err := fileManager.Backup(s.config.File.HostFile, ""); err != nil {
+		return fmt.Errorf("failed to backup _host.js: %v", err)
+	}
+
+	// 删除该品牌的配置块
+	lines := strings.Split(contentStr, "\n")
+	var newLines []string
+	inBrandBlock := false
+
+	for _, line := range lines {
+		if strings.Contains(line, brandPattern) {
+			inBrandBlock = true
+			continue
+		}
+
+		if inBrandBlock {
+			if strings.Contains(line, "// #endif") {
+				inBrandBlock = false
+				continue
+			}
+			continue
+		}
+
+		newLines = append(newLines, line)
+	}
+
+	// 写回文件
+	newContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(s.config.File.HostFile, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to write _host.js: %v", err)
+	}
+
+	log.Printf("✅ 删除_host.js品牌配置成功: %s", brandCode)
+	return nil
+}
+
+// removeFileIfExists 删除文件（如果存在）
+func (s *FileService) removeFileIfExists(filePath string, fileManager *rollback.FileRollback) error {
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		log.Printf("⚠️ 文件不存在，跳过删除: %s", filePath)
+		return nil
+	}
+
+	// 检查文件是否已被备份（用于回滚）
+	if fileManager.HasBackup(filePath) {
+		log.Printf("✅ 文件已被备份，可以直接删除: %s", filePath)
+	} else {
+		log.Printf("⚠️ 文件未被备份，删除后无法回滚: %s", filePath)
+	}
+
+	// 删除文件
+	if err := os.Remove(filePath); err != nil {
+		return fmt.Errorf("failed to delete file: %v", err)
+	}
+
+	log.Printf("🗑️ 文件删除成功: %s", filePath)
+	return nil
 }

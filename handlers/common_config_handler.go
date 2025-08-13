@@ -52,12 +52,12 @@ func (h *CommonConfigHandler) CreateCommonConfig(c *gin.Context) {
 	utils.Created(c, gin.H{"data": config}, "通用配置创建成功")
 }
 
-// UpdateCommonConfig 更新通用配置
-func (h *CommonConfigHandler) UpdateCommonConfig(c *gin.Context) {
-	id := c.Param("id")
-	configID, err := strconv.Atoi(id)
+// UpdateCommonConfigByClientID 根据client_id更新通用配置
+func (h *CommonConfigHandler) UpdateCommonConfigByClientID(c *gin.Context) {
+	clientID := c.Param("client_id")
+	clientIDInt, err := strconv.Atoi(clientID)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
@@ -67,27 +67,31 @@ func (h *CommonConfigHandler) UpdateCommonConfig(c *gin.Context) {
 		return
 	}
 
-	if err := h.commonConfigService.UpdateCommonConfig(configID, &config); err != nil {
-		utils.InternalServerError(c, "更新通用配置失败")
+	if err := h.commonConfigService.UpdateCommonConfigByClientID(clientIDInt, config); err != nil {
+		utils.InternalServerError(c, "更新通用配置失败: "+err.Error())
 		return
 	}
 
 	utils.Success(c, gin.H{"data": config}, "通用配置更新成功")
 }
 
-// DeleteCommonConfig 删除通用配置
-func (h *CommonConfigHandler) DeleteCommonConfig(c *gin.Context) {
-	id := c.Param("id")
-	configID, err := strconv.Atoi(id)
+// DeleteCommonConfigByClientID 根据client_id删除通用配置
+func (h *CommonConfigHandler) DeleteCommonConfigByClientID(c *gin.Context) {
+	clientIDStr := c.Param("client_id")
+	clientID, err := strconv.Atoi(clientIDStr)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
-	if err := h.commonConfigService.DeleteCommonConfig(configID); err != nil {
-		utils.InternalServerError(c, "删除通用配置失败")
+	err = h.commonConfigService.DeleteCommonConfigByClientID(clientID)
+	if err != nil {
+		utils.InternalServerError(c, "删除通用配置失败: "+err.Error())
 		return
 	}
 
-	utils.Success(c, nil, "通用配置删除成功")
+	utils.Success(c, gin.H{
+		"message":   "通用配置删除成功",
+		"client_id": clientID,
+	}, "通用配置删除成功")
 }

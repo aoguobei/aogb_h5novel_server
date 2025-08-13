@@ -38,17 +38,24 @@ func NewFileRollback(cfg *config.Config) *FileRollback {
 func (fr *FileRollback) Backup(path, content string) error {
 	log.Printf("🔄 文件回滚器：备份文件 %s", path)
 
-	// 检查文件是否存在
-	if _, err := os.Stat(path); err == nil {
-		// 文件存在，读取原始内容作为备份
-		originalContent, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("failed to read file for backup: %v", err)
+	// 检查路径是否存在
+	stat, err := os.Stat(path)
+	if err == nil {
+		if stat.IsDir() {
+			// 是目录，标记为需要删除的目录
+			fr.createdFiles = append(fr.createdFiles, path)
+			log.Printf("📝 标记为需要删除的目录: %s", path)
+		} else {
+			// 是文件，读取原始内容作为备份
+			originalContent, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("failed to read file for backup: %v", err)
+			}
+			fr.backupFiles[path] = string(originalContent)
+			log.Printf("✅ 文件备份成功: %s (内容长度: %d)", path, len(originalContent))
 		}
-		fr.backupFiles[path] = string(originalContent)
-		log.Printf("✅ 文件备份成功: %s", path)
 	} else {
-		// 文件不存在，标记为新创建的文件
+		// 路径不存在，标记为新创建的文件
 		fr.createdFiles = append(fr.createdFiles, path)
 		log.Printf("📝 标记为新创建文件: %s", path)
 	}
@@ -58,26 +65,33 @@ func (fr *FileRollback) Backup(path, content string) error {
 
 // Restore 恢复文件内容
 func (fr *FileRollback) Restore(path string) error {
-	log.Printf("🔄 文件回滚器：恢复文件 %s", path)
-
 	// 检查是否有备份
 	originalContent, hasBackup := fr.backupFiles[path]
 	if hasBackup {
 		// 恢复原始内容
+		log.Printf("📄 恢复文件: %s (长度: %d)", path, len(originalContent))
 		if err := os.WriteFile(path, []byte(originalContent), 0644); err != nil {
 			return fmt.Errorf("failed to restore file: %v", err)
 		}
-		// log.Printf("✅ 文件恢复成功: %s", path)
 		delete(fr.backupFiles, path)
 	} else {
-		// 检查是否是新创建的文件
-		for i, createdFile := range fr.createdFiles {
-			if createdFile == path {
-				// 删除新创建的文件
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("failed to remove created file: %v", err)
+		// 检查是否是新创建的文件或目录
+		for i, createdPath := range fr.createdFiles {
+			if createdPath == path {
+				// 检查是文件还是目录
+				if stat, err := os.Stat(path); err == nil && stat.IsDir() {
+					// 是目录，删除目录及其内容
+					if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+						return fmt.Errorf("failed to remove created directory: %v", err)
+					}
+					log.Printf("✅ 删除新创建目录: %s", path)
+				} else {
+					// 是文件，删除文件
+					if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+						return fmt.Errorf("failed to remove created file: %v", err)
+					}
+					log.Printf("✅ 删除新创建文件: %s", path)
 				}
-				log.Printf("✅ 删除新创建文件: %s", path)
 				// 从列表中移除
 				fr.createdFiles = append(fr.createdFiles[:i], fr.createdFiles[i+1:]...)
 				break
@@ -93,6 +107,22 @@ func (fr *FileRollback) Rollback() error {
 	log.Printf("🔄 文件回滚器：开始回滚所有文件操作")
 	log.Printf("📊 需要回滚的文件数量: 备份文件=%d, 新创建文件=%d", len(fr.backupFiles), len(fr.createdFiles))
 
+	// 打印备份文件列表
+	if len(fr.backupFiles) > 0 {
+		log.Printf("📋 备份文件列表:")
+		for path := range fr.backupFiles {
+			log.Printf("  - %s", path)
+		}
+	}
+
+	// 打印新创建文件列表
+	if len(fr.createdFiles) > 0 {
+		log.Printf("📋 新创建文件列表:")
+		for _, path := range fr.createdFiles {
+			log.Printf("  - %s", path)
+		}
+	}
+
 	var errors []error
 	var successCount int
 
@@ -100,48 +130,51 @@ func (fr *FileRollback) Rollback() error {
 	for path := range fr.backupFiles {
 		if err := fr.Restore(path); err != nil {
 			errors = append(errors, fmt.Errorf("failed to restore %s: %v", path, err))
-			log.Printf("❌ 文件恢复失败: %s - %v", path, err)
+			log.Printf("❌ 恢复失败: %s - %v", path, err)
 		} else {
 			successCount++
-			log.Printf("✅ 文件恢复成功: %s", path)
 		}
 	}
 
-	// 删除所有新创建的文件
+	// 删除所有新创建的文件和目录
 	for _, path := range fr.createdFiles {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			errors = append(errors, fmt.Errorf("failed to remove %s: %v", path, err))
-			log.Printf("❌ 删除新创建文件失败: %s - %v", path, err)
+		// 检查是文件还是目录
+		if stat, err := os.Stat(path); err == nil && stat.IsDir() {
+			// 是目录，删除目录及其内容
+			if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+				errors = append(errors, fmt.Errorf("failed to remove directory %s: %v", path, err))
+				log.Printf("❌ 删除目录失败: %s - %v", path, err)
+			} else {
+				successCount++
+			}
 		} else {
-			successCount++
-			log.Printf("✅ 删除新创建文件成功: %s", path)
+			// 是文件，删除文件
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				errors = append(errors, fmt.Errorf("failed to remove file %s: %v", path, err))
+				log.Printf("❌ 删除文件失败: %s - %v", path, err)
+			} else {
+				successCount++
+			}
 		}
 	}
 
 	// 清空列表
 	fr.createdFiles = fr.createdFiles[:0]
 
-	// 详细的结果报告
+	// 结果报告
 	if len(errors) > 0 {
 		log.Printf("⚠️ 文件回滚完成，但有 %d 个错误", len(errors))
-		for i, err := range errors {
-			log.Printf("  %d. %v", i+1, err)
-		}
 		return fmt.Errorf("file rollback completed with %d errors: %v", len(errors), errors)
 	}
 
-	log.Printf("✅ 文件回滚完成，成功处理 %d 个文件", successCount)
+	log.Printf("✅ 文件回滚完成，处理 %d 个文件", successCount)
 	return nil
 }
 
 // Clear 清空所有备份信息
 func (fr *FileRollback) Clear() error {
-	log.Printf("🧹 文件回滚器：清空所有备份信息")
-
 	fr.backupFiles = make(map[string]string)
 	fr.createdFiles = fr.createdFiles[:0]
-
-	log.Printf("✅ 备份信息已清空")
 	return nil
 }
 
@@ -153,4 +186,10 @@ func (fr *FileRollback) GetBackupCount() int {
 // GetCreatedFileCount 获取新创建文件数量
 func (fr *FileRollback) GetCreatedFileCount() int {
 	return len(fr.createdFiles)
+}
+
+// HasBackup 检查指定文件是否已有备份
+func (fr *FileRollback) HasBackup(filePath string) bool {
+	_, exists := fr.backupFiles[filePath]
+	return exists
 }

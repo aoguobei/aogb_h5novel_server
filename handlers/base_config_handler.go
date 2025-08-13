@@ -66,55 +66,33 @@ func (h *BaseConfigHandler) CreateBaseConfig(c *gin.Context) {
 		return
 	}
 
-	err := h.baseConfigService.CreateBaseConfig(&config)
-	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "创建配置失败")
+	if err := h.baseConfigService.CreateBaseConfig(&config); err != nil {
+		utils.InternalServerError(c, "创建基础配置失败")
 		return
 	}
 
-	utils.Created(c, config, "创建配置成功")
+	utils.Created(c, gin.H{"data": config}, "基础配置创建成功")
 }
 
-// UpdateBaseConfig 更新基础配置
-func (h *BaseConfigHandler) UpdateBaseConfig(c *gin.Context) {
-	idStr := c.Param("id")
-	configID, err := strconv.Atoi(idStr)
+// DeleteBaseConfigByClientID 根据client_id删除基础配置
+func (h *BaseConfigHandler) DeleteBaseConfigByClientID(c *gin.Context) {
+	clientIDStr := c.Param("clientId")
+	clientID, err := strconv.Atoi(clientIDStr)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
-	var config models.BaseConfig
-	if err := c.ShouldBindJSON(&config); err != nil {
-		utils.BadRequest(c, "请求参数错误")
-		return
-	}
-
-	err = h.baseConfigService.UpdateBaseConfig(configID, &config)
+	err = h.baseConfigService.DeleteBaseConfigByClientID(clientID)
 	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "更新配置失败")
+		utils.InternalServerError(c, "删除配置失败: "+err.Error())
 		return
 	}
 
-	utils.Success(c, config, "更新配置成功")
-}
-
-// DeleteBaseConfig 删除基础配置
-func (h *BaseConfigHandler) DeleteBaseConfig(c *gin.Context) {
-	idStr := c.Param("id")
-	configID, err := strconv.Atoi(idStr)
-	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
-		return
-	}
-
-	err = h.baseConfigService.DeleteBaseConfig(configID)
-	if err != nil {
-		utils.Error(c, http.StatusInternalServerError, "删除配置失败")
-		return
-	}
-
-	utils.Success(c, nil, "删除配置成功")
+	utils.Success(c, gin.H{
+		"message":   "基础配置删除成功",
+		"client_id": clientID,
+	}, "基础配置删除成功")
 }
 
 // UpdateBaseConfigByClientID 根据client_id更新基础配置

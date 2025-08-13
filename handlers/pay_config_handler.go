@@ -52,12 +52,12 @@ func (h *PayConfigHandler) CreatePayConfig(c *gin.Context) {
 	utils.Created(c, gin.H{"data": config}, "支付配置创建成功")
 }
 
-// UpdatePayConfig 更新支付配置
-func (h *PayConfigHandler) UpdatePayConfig(c *gin.Context) {
-	id := c.Param("id")
-	configID, err := strconv.Atoi(id)
+// UpdatePayConfigByClientID 根据client_id更新支付配置
+func (h *PayConfigHandler) UpdatePayConfigByClientID(c *gin.Context) {
+	clientID := c.Param("client_id")
+	clientIDInt, err := strconv.Atoi(clientID)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
@@ -67,27 +67,31 @@ func (h *PayConfigHandler) UpdatePayConfig(c *gin.Context) {
 		return
 	}
 
-	if err := h.payConfigService.UpdatePayConfig(configID, &config); err != nil {
-		utils.InternalServerError(c, "更新支付配置失败")
+	if err := h.payConfigService.UpdatePayConfigByClientID(clientIDInt, config); err != nil {
+		utils.InternalServerError(c, "更新支付配置失败: "+err.Error())
 		return
 	}
 
 	utils.Success(c, gin.H{"data": config}, "支付配置更新成功")
 }
 
-// DeletePayConfig 删除支付配置
-func (h *PayConfigHandler) DeletePayConfig(c *gin.Context) {
-	id := c.Param("id")
-	configID, err := strconv.Atoi(id)
+// DeletePayConfigByClientID 根据client_id删除支付配置
+func (h *PayConfigHandler) DeletePayConfigByClientID(c *gin.Context) {
+	clientIDStr := c.Param("client_id")
+	clientID, err := strconv.Atoi(clientIDStr)
 	if err != nil {
-		utils.BadRequest(c, "无效的配置ID")
+		utils.BadRequest(c, "无效的客户端ID")
 		return
 	}
 
-	if err := h.payConfigService.DeletePayConfig(configID); err != nil {
-		utils.InternalServerError(c, "删除支付配置失败")
+	err = h.payConfigService.DeletePayConfigByClientID(clientID)
+	if err != nil {
+		utils.InternalServerError(c, "删除支付配置失败: "+err.Error())
 		return
 	}
 
-	utils.Success(c, nil, "支付配置删除成功")
+	utils.Success(c, gin.H{
+		"message":   "支付配置删除成功",
+		"client_id": clientID,
+	}, "支付配置删除成功")
 }

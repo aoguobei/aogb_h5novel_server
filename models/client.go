@@ -18,4 +18,5 @@ type Client struct {
 	CommonConfigs []CommonConfig `json:"common_configs" gorm:"foreignKey:ClientID"`
 	PayConfigs    []PayConfig    `json:"pay_configs" gorm:"foreignKey:ClientID"`
 	UIConfigs     []UIConfig     `json:"ui_configs" gorm:"foreignKey:ClientID"`
+	NovelConfigs  []NovelConfig  `json:"novel_configs" gorm:"foreignKey:ClientID"`
 }
