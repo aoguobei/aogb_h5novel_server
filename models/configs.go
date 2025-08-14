@@ -88,8 +88,8 @@ type UIConfig struct {
 type NovelConfig struct {
 	ID                    int       `json:"id" gorm:"primaryKey"`
 	ClientID              int       `json:"client_id" gorm:"not null;uniqueIndex"` // 关联的客户端ID，唯一约束
-	TTJumpHomeUrl         string    `json:"tt_jump_home_url" gorm:"type:varchar(500)"`
-	TTLoginCallbackDomain string    `json:"tt_login_callback_domain" gorm:"type:varchar(200)"`
+	TTJumpHomeUrl         string    `json:"tt_jump_home_url" gorm:"column:tt_jump_home_url;type:varchar(500)"`
+	TTLoginCallbackDomain string    `json:"tt_login_callback_domain" gorm:"column:tt_login_callback_domain;type:varchar(200)"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
 

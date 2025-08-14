@@ -213,11 +213,11 @@ func (s *FileService) updateViteConfigFile(brandCode, host string, scriptBase st
 	}
 	mapEndIndex += mapStartIndex
 
-	// 插入新的配置
+	// 插入新的配置（确保换行）
 	newConfigEntry := fmt.Sprintf(`  '%s-%s': '%s',`, host, brandCode, scriptBase)
 
-	// 在basePathMap对象内部插入新条目
-	newContent := contentStr[:mapEndIndex] + "\n" + newConfigEntry + contentStr[mapEndIndex:]
+	// 在basePathMap对象内部插入新条目，确保在反括号前换行
+	newContent := contentStr[:mapEndIndex] + newConfigEntry + "\n" + contentStr[mapEndIndex:]
 
 	// 写回文件
 	if err := os.WriteFile(s.config.File.ViteConfigFile, []byte(newContent), 0644); err != nil {
@@ -245,84 +245,77 @@ func (s *FileService) updatePackageJSONFile(brandCode, host string, appName stri
 		return nil
 	}
 
-	// 1. 添加scripts - 在scripts块的末尾添加
-	scriptsEndIndex := s.jsonUtils.FindScriptsEndIndex(contentStr)
-	if scriptsEndIndex > 0 {
-		fmt.Printf("🔍 Found scripts block end position: %d\n", scriptsEndIndex)
-
-		// 找到scripts块中最后一个脚本的结束位置
-		lastScriptEndIndex := s.jsonUtils.FindLastScriptEndIndex(contentStr, scriptsEndIndex)
-		if lastScriptEndIndex > 0 {
-			fmt.Printf("🔍 Found last script end position: %d\n", lastScriptEndIndex)
-
-			// 在最后一个脚本后面添加逗号和新脚本
-			newScripts := fmt.Sprintf(`,
-    "dev:%s": "uni -p %s --minify",
-    "build:%s": "cross-env UNI_UTS_PLATFORM=%s npm run prebuild && uni build -p %s --minify"`,
-				platformKey, platformKey, platformKey, platformKey, platformKey)
-
-			// 在最后一个脚本后面插入新内容
-			contentStr = contentStr[:lastScriptEndIndex] + newScripts + contentStr[lastScriptEndIndex:]
-			fmt.Println("✅ Added scripts configuration")
-		} else {
-			fmt.Println("❌ Could not find last script position")
-			return fmt.Errorf("failed to find last script position")
-		}
-	} else {
-		fmt.Println("❌ Could not find scripts block")
-		return fmt.Errorf("failed to find scripts block")
+	// 1. 添加scripts - 直接在 "scripts": { 后一行添加
+	scriptsStartIndex := strings.Index(contentStr, `"scripts": {`)
+	if scriptsStartIndex == -1 {
+		return fmt.Errorf("cannot find scripts block in package.json")
 	}
 
-	// 2. 添加uni-app.scripts - 在uni-app.scripts块的末尾添加
-	uniAppScriptsEndIndex := s.jsonUtils.FindUniAppScriptsEndIndex(contentStr)
-	if uniAppScriptsEndIndex > 0 {
-		fmt.Printf("🔍 Found uni-app.scripts block end position: %d\n", uniAppScriptsEndIndex)
+	// 找到 "scripts": { 行的结束位置
+	scriptsLineEndIndex := strings.Index(contentStr[scriptsStartIndex:], "\n")
+	if scriptsLineEndIndex == -1 {
+		return fmt.Errorf("cannot find end of scripts line")
+	}
+	insertPosition := scriptsStartIndex + scriptsLineEndIndex + 1
 
-		// 找到uni-app.scripts块中最后一个配置的结束位置
-		lastUniAppScriptEndIndex := s.jsonUtils.FindLastUniAppScriptEndIndex(contentStr, uniAppScriptsEndIndex)
-		if lastUniAppScriptEndIndex > 0 {
-			fmt.Printf("🔍 Found last uni-app script end position: %d\n", lastUniAppScriptEndIndex)
+	// 添加新脚本（带逗号）
+	newScripts := fmt.Sprintf(`    "dev:%s": "uni -p %s --minify",
+    "build:%s": "cross-env UNI_UTS_PLATFORM=%s npm run prebuild && uni build -p %s --minify",
+`, platformKey, platformKey, platformKey, platformKey, platformKey)
 
-			// 在最后一个配置后面添加逗号和新配置
-			newUniAppScript := fmt.Sprintf(`,
-    "%s": {
-      "env": {
-        "UNI_PLATFORM": "%s"
-      },
-      "define": {
-        "MP-%s": true`, platformKey, s.fileUtils.GetUniPlatform(host), strings.ToUpper(brandCode))
+	// 插入新脚本
+	contentStr = contentStr[:insertPosition] + newScripts + contentStr[insertPosition:]
 
-			// 根据host类型设置对应的平台宏
-			switch host {
-			case "tth5":
-				newUniAppScript += `,
-        "MP-TTH5": true`
-			case "ksh5":
-				newUniAppScript += `,
-        "MP-KSH5": true`
-			case "h5":
-				newUniAppScript += `,
-        "MP-H5": true`
-			}
-
-			newUniAppScript += fmt.Sprintf(`
-      },
-      "title": "h5%s"
-    }`, appName)
-
-			// 在最后一个配置后面插入新内容
-			contentStr = contentStr[:lastUniAppScriptEndIndex] + newUniAppScript + contentStr[lastUniAppScriptEndIndex:]
-			fmt.Println("✅ Added uni-app.scripts configuration")
-		} else {
-			fmt.Println("❌ Could not find last uni-app script position")
-			return fmt.Errorf("failed to find last uni-app script position")
-		}
-	} else {
-		fmt.Println("❌ Could not find uni-app.scripts block")
-		return fmt.Errorf("failed to find uni-app.scripts block")
+	// 2. 添加uni-app.scripts - 直接在 "scripts": { 后一行添加
+	uniAppScriptsStartIndex := strings.Index(contentStr, `"uni-app": {`)
+	if uniAppScriptsStartIndex == -1 {
+		return fmt.Errorf("cannot find uni-app block in package.json")
 	}
 
-	// 写回文件，保持原有格式
+	// 在uni-app块中查找 "scripts": {
+	uniAppScriptsStart := strings.Index(contentStr[uniAppScriptsStartIndex:], `"scripts": {`)
+	if uniAppScriptsStart == -1 {
+		return fmt.Errorf("cannot find uni-app.scripts block in package.json")
+	}
+
+	uniAppScriptsStart += uniAppScriptsStartIndex
+	uniAppScriptsLineEndIndex := strings.Index(contentStr[uniAppScriptsStart:], "\n")
+	if uniAppScriptsLineEndIndex == -1 {
+		return fmt.Errorf("cannot find end of uni-app.scripts line")
+	}
+	uniAppInsertPosition := uniAppScriptsStart + uniAppScriptsLineEndIndex + 1
+
+	// 添加新uni-app脚本（带逗号，正确的缩进）
+	newUniAppScript := fmt.Sprintf(`      "%s": {
+        "env": {
+          "UNI_PLATFORM": "%s"
+        },
+        "define": {
+          "MP-%s": true`, platformKey, s.fileUtils.GetUniPlatform(host), strings.ToUpper(brandCode))
+
+	// 根据host类型设置对应的平台宏
+	switch host {
+	case "tth5":
+		newUniAppScript += `,
+          "MP-TTH5": true`
+	case "ksh5":
+		newUniAppScript += `,
+          "MP-KSH5": true`
+	case "h5":
+		newUniAppScript += `,
+          "MP-H5": true`
+	}
+
+	newUniAppScript += fmt.Sprintf(`
+        },
+        "title": "h5%s"
+      },
+`, appName)
+
+	// 插入新uni-app脚本
+	contentStr = contentStr[:uniAppInsertPosition] + newUniAppScript + contentStr[uniAppInsertPosition:]
+
+	// 写回文件
 	if err := os.WriteFile(s.config.File.PackageFile, []byte(contentStr), 0644); err != nil {
 		return fmt.Errorf("failed to write package.json: %v", err)
 	}
@@ -371,11 +364,10 @@ func (s *FileService) UpdateHostFileForBrand(brandCode string) error {
 	// 插入位置是函数声明行的下一行开头
 	insertPosition := funcLineEndIndex + nextNewlineIndex + 1
 
-	// 准备要插入的新 brand 代码
+	// 准备要插入的新 brand 代码（不包含额外的空行）
 	newBrandCode := fmt.Sprintf(`  // #ifdef MP-%s
   return '%s'
-  // #endif
-`, strings.ToUpper(brandCode), brandCode)
+  // #endif`, strings.ToUpper(brandCode), brandCode)
 
 	// 在 getBrand_ 函数声明的下一行插入新代码
 	newContent := contentStr[:insertPosition] + newBrandCode + "\n" + contentStr[insertPosition:]
@@ -419,7 +411,7 @@ func (s *FileService) updateIndexFileForBrand(brandCode string) error {
 		return nil
 	}
 
-	// 生成新的配置块
+	// 生成新的配置块（不包含空行）
 	newBlock := []string{
 		fmt.Sprintf("// #ifdef MP-%s", upperBrandCode),
 		fmt.Sprintf("import baseConfig from './baseConfigs/%s.js'", brandCode),
@@ -428,7 +420,6 @@ func (s *FileService) updateIndexFileForBrand(brandCode string) error {
 		fmt.Sprintf("import uiConfig from './uiConfigs/%s.js'", brandCode),
 		"import localConfig from './localConfigs/base.js'",
 		"// #endif",
-		"",
 	}
 
 	// 找到第一个 #ifdef 的位置，在其前面插入新块
@@ -551,14 +542,54 @@ func (s *FileService) removePackageJSONEntries(brandCode, host string, fileManag
 		return fmt.Errorf("failed to backup package.json: %v", err)
 	}
 
-	// 删除scripts中的配置
-	contentStr = s.jsonUtils.RemoveScriptsEntry(contentStr, platformKey)
+	// 按行删除包含该平台标识的所有行
+	lines := strings.Split(contentStr, "\n")
+	var newLines []string
+	skipMode := false
+	braceCount := 0
 
-	// 删除uni-app.scripts中的配置
-	contentStr = s.jsonUtils.RemoveUniAppScriptsEntry(contentStr, platformKey)
+	for _, line := range lines {
+
+		// 检查是否进入删除模式
+		if strings.Contains(line, fmt.Sprintf(`"%s": {`, platformKey)) {
+			skipMode = true
+			braceCount = 1
+			log.Printf("🗑️ 开始删除uni-app.scripts配置块: %s", platformKey)
+			continue
+		}
+
+		// 如果在删除模式中
+		if skipMode {
+			// 计算大括号数量
+			for _, char := range line {
+				if char == '{' {
+					braceCount++
+				} else if char == '}' {
+					braceCount--
+					// 当大括号数量归零时，退出删除模式
+					if braceCount == 0 {
+						skipMode = false
+						log.Printf("🗑️ 完成删除uni-app.scripts配置块: %s", platformKey)
+						continue
+					}
+				}
+			}
+			// 跳过当前行
+			continue
+		}
+
+		// 检查是否包含该平台标识的行（scripts部分）
+		if strings.Contains(line, platformKey) {
+			log.Printf("🗑️ 删除package.json行: %s", strings.TrimSpace(line))
+			continue
+		}
+
+		newLines = append(newLines, line)
+	}
 
 	// 写回文件
-	if err := os.WriteFile(s.config.File.PackageFile, []byte(contentStr), 0644); err != nil {
+	newContent := strings.Join(newLines, "\n")
+	if err := os.WriteFile(s.config.File.PackageFile, []byte(newContent), 0644); err != nil {
 		return fmt.Errorf("failed to write package.json: %v", err)
 	}
 
@@ -590,111 +621,6 @@ func (s *FileService) removePrebuildPagesFile(brandCode, host string, fileManage
 	return nil
 }
 
-// removeNovelConfigEntries 删除novelconfig.js中对应品牌的host配置
-func (s *FileService) removeNovelConfigEntries(brandCode, host string, fileManager *rollback.FileRollback) error {
-	novelConfigFile := filepath.Join(s.config.File.LocalConfigsDir, "novelConfig.js")
-
-	// 检查文件是否存在
-	if _, err := os.Stat(novelConfigFile); os.IsNotExist(err) {
-		log.Printf("⚠️ novelconfig.js文件不存在: %s", novelConfigFile)
-		return nil
-	}
-
-	content, err := os.ReadFile(novelConfigFile)
-	if err != nil {
-		return fmt.Errorf("failed to read novelconfig.js: %v", err)
-	}
-
-	contentStr := string(content)
-
-	// 检查是否存在该品牌的配置
-	if !strings.Contains(contentStr, fmt.Sprintf(`"%s": {`, brandCode)) {
-		log.Printf("⚠️ novelconfig.js中不存在品牌配置: %s", brandCode)
-		return nil
-	}
-
-	// 文件已在 WebsiteService 中预先备份，这里直接进行修改
-	log.Printf("🔄 准备修改 novelconfig.js: %s", novelConfigFile)
-
-	// 删除该品牌下对应host的配置
-	// 如果删除的是tth5或ksh5，同时删除对应的tt或ks配置
-	var hostsToDelete []string
-	hostsToDelete = append(hostsToDelete, host)
-
-	if host == "tth5" {
-		hostsToDelete = append(hostsToDelete, "tt")
-	} else if host == "ksh5" {
-		hostsToDelete = append(hostsToDelete, "ks")
-	}
-
-	log.Printf("🗑️ 准备删除 novelconfig.js 中的配置: brand=%s, hosts=%v", brandCode, hostsToDelete)
-
-	// 删除每个host的配置
-	for _, hostToDelete := range hostsToDelete {
-		contentStr = s.removeNovelConfigHostEntry(contentStr, brandCode, hostToDelete)
-	}
-
-	// 写回文件
-	log.Printf("📝 准备写回 novelconfig.js")
-	if err := os.WriteFile(novelConfigFile, []byte(contentStr), 0644); err != nil {
-		return fmt.Errorf("failed to write novelconfig.js: %v", err)
-	}
-	log.Printf("✅ novelconfig.js 写回完成")
-
-	log.Printf("✅ 删除novelconfig.js配置成功: brand=%s, hosts=%v", brandCode, hostsToDelete)
-	return nil
-}
-
-// removeNovelConfigHostEntry 删除novelconfig.js中指定品牌的指定host配置
-func (s *FileService) removeNovelConfigHostEntry(content, brandCode, host string) string {
-	log.Printf("🔍 开始删除 novelconfig.js 中的配置: brand=%s, host=%s", brandCode, host)
-
-	// 查找品牌配置块
-	brandPattern := fmt.Sprintf(`"%s": {`, brandCode)
-	brandStart := strings.Index(content, brandPattern)
-	if brandStart == -1 {
-		log.Printf("⚠️ 未找到品牌配置块: %s", brandCode)
-		return content
-	}
-	log.Printf("✅ 找到品牌配置块: %s, 位置: %d", brandCode, brandStart)
-
-	// 找到品牌配置块的结束位置
-	brandEnd := findBrandConfigEnd(content, brandStart)
-	if brandEnd == -1 {
-		log.Printf("⚠️ 未找到品牌配置块结束位置: %s", brandCode)
-		return content
-	}
-	log.Printf("✅ 找到品牌配置块结束位置: %d", brandEnd)
-
-	// 在品牌配置块中查找host配置
-	hostPattern := fmt.Sprintf(`"%s": {`, host)
-	hostStart := strings.Index(content[brandStart:brandEnd], hostPattern)
-	if hostStart == -1 {
-		log.Printf("⚠️ 未找到host配置: %s", host)
-		return content
-	}
-	hostStart += brandStart
-	log.Printf("✅ 找到host配置: %s, 位置: %d", host, hostStart)
-
-	// 找到host配置的结束位置
-	hostEnd := findHostConfigEnd(content, hostStart)
-	if hostEnd == -1 {
-		log.Printf("⚠️ 未找到host配置结束位置: %s", host)
-		return content
-	}
-	log.Printf("✅ 找到host配置结束位置: %d", hostEnd)
-
-	// 删除host配置
-	newContent := content[:hostStart] + content[hostEnd:]
-	log.Printf("🗑️ 删除host配置: %s (从位置 %d 到 %d)", host, hostStart, hostEnd)
-
-	// 清理多余的逗号
-	newContent = cleanNovelConfigCommas(newContent)
-	log.Printf("✅ host配置删除完成: %s", host)
-
-	return newContent
-}
-
 // findBrandConfigEnd 找到品牌配置块的结束位置
 func findBrandConfigEnd(content string, startIndex int) int {
 	braceCount := 0
@@ -709,36 +635,6 @@ func findBrandConfigEnd(content string, startIndex int) int {
 		}
 	}
 	return -1
-}
-
-// findHostConfigEnd 找到host配置的结束位置
-func findHostConfigEnd(content string, startIndex int) int {
-	braceCount := 0
-	for i := startIndex; i < len(content); i++ {
-		if content[i] == '{' {
-			braceCount++
-		} else if content[i] == '}' {
-			braceCount--
-			if braceCount == 0 {
-				return i + 1
-			}
-		}
-	}
-	return -1
-}
-
-// cleanNovelConfigCommas 清理novelconfig.js中的多余逗号
-func cleanNovelConfigCommas(content string) string {
-	// 清理连续逗号
-	content = strings.ReplaceAll(content, ",,", ",")
-
-	// 清理逗号后的大括号
-	content = strings.ReplaceAll(content, ",}", "}")
-
-	// 清理逗号后的方括号
-	content = strings.ReplaceAll(content, ",]", "]")
-
-	return content
 }
 
 // removeNovelConfigBrandBlock 删除novelconfig.js中该品牌的整个配置块
@@ -784,9 +680,6 @@ func (s *FileService) removeNovelConfigBrandBlock(brandCode string, fileManager 
 
 	// 删除品牌配置块
 	newContent := contentStr[:brandStart] + contentStr[brandEnd:]
-
-	// 清理多余的逗号
-	newContent = cleanNovelConfigCommas(newContent)
 
 	// 写回文件
 	if err := os.WriteFile(novelConfigFile, []byte(newContent), 0644); err != nil {
@@ -904,7 +797,7 @@ func (s *FileService) removePrebuildHostDir(brandCode, host string, fileManager 
 	return nil
 }
 
-// removeStaticImageDir 删除static图片目录（如果为空）
+// removeStaticImageDir 删除static图片目录
 func (s *FileService) removeStaticImageDir(brandCode string, fileManager *rollback.FileRollback) error {
 	staticImageDir := filepath.Join(s.config.File.StaticDir, "img-"+brandCode)
 
@@ -913,24 +806,13 @@ func (s *FileService) removeStaticImageDir(brandCode string, fileManager *rollba
 		return nil
 	}
 
-	// 检查目录是否为空
-	entries, err := os.ReadDir(staticImageDir)
-	if err != nil {
-		return fmt.Errorf("failed to read directory: %v", err)
-	}
-
-	if len(entries) > 0 {
-		log.Printf("⚠️ static图片目录不为空，跳过删除: %s", staticImageDir)
-		return nil
-	}
-
 	// 备份目录
 	if err := fileManager.Backup(staticImageDir, ""); err != nil {
 		return fmt.Errorf("failed to backup static image directory: %v", err)
 	}
 
-	// 删除目录
-	if err := os.Remove(staticImageDir); err != nil {
+	// 删除目录及其所有内容
+	if err := os.RemoveAll(staticImageDir); err != nil {
 		return fmt.Errorf("failed to delete static image directory: %v", err)
 	}
 

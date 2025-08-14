@@ -282,3 +282,45 @@ func (s *NovelConfigService) FormatNovelConfig(novelConfig models.NovelConfig) m
 		"tt_login_callback_domain": novelConfig.TTLoginCallbackDomain,
 	}
 }
+
+// RemoveNovelConfigEntries 删除novelconfig.js中对应品牌的host配置
+func (s *NovelConfigService) RemoveNovelConfigEntries(ctx *rollback.TransactionContext, brandCode, host string) error {
+	novelConfigFile := filepath.Join(s.config.File.LocalConfigsDir, "novelConfig.js")
+
+	// 检查文件是否存在
+	if _, err := os.Stat(novelConfigFile); os.IsNotExist(err) {
+		return nil
+	}
+
+	// 读取现有配置文件
+	configfileManager := utils.NewConfigFileManager()
+	configData, err := configfileManager.ReadConfigFile(novelConfigFile)
+	if err != nil {
+		return fmt.Errorf("failed to read novelconfig.js: %v", err)
+	}
+
+	// 检查是否存在该品牌的配置
+	if brandConfig, exists := configData[brandCode]; !exists {
+		return nil
+	} else {
+		// 检查品牌配置是否为map类型
+		if hostConfig, ok := brandConfig.(map[string]interface{}); ok {
+			// 删除指定host的配置
+			if _, hostExists := hostConfig[host]; hostExists {
+				delete(hostConfig, host)
+
+				// 如果品牌配置为空，删除整个品牌配置
+				if len(hostConfig) == 0 {
+					delete(configData, brandCode)
+				}
+			}
+		}
+	}
+
+	// 写入更新后的配置文件
+	if err := configfileManager.WriteConfigDataToFile(configData, novelConfigFile); err != nil {
+		return fmt.Errorf("failed to write novelconfig.js: %v", err)
+	}
+
+	return nil
+}

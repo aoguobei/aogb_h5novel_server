@@ -5,7 +5,6 @@ import (
 	"log"
 
 	"brand-config-api/config"
-	"brand-config-api/models"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -36,20 +35,20 @@ func InitDB() {
 
 	DB = db
 
-	// 自动迁移数据库表
-	err = DB.AutoMigrate(
-		&models.Brand{},
-		&models.Client{},
-		&models.BaseConfig{},
-		&models.CommonConfig{},
-		&models.PayConfig{},
-		&models.UIConfig{},
-		&models.NovelConfig{},
-	)
+	// 自动迁移数据库表（已禁用，使用 init.sql 手动建表）
+	// err = DB.AutoMigrate(
+	// 	&models.Brand{},
+	// 	&models.Client{},
+	// 	&models.BaseConfig{},
+	// 	&models.CommonConfig{},
+	// 	&models.PayConfig{},
+	// 	&models.UIConfig{},
+	// 	&models.NovelConfig{},
+	// )
 
-	if err != nil {
-		log.Fatal("Failed to migrate database:", err)
-	}
+	// if err != nil {
+	// 	log.Fatal("Failed to migrate database:", err)
+	// }
 
 	log.Println("Database connected and migrated successfully")
 }

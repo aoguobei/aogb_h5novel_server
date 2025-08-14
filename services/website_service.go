@@ -252,6 +252,10 @@ func (s *WebsiteService) GetWebsiteConfig(clientID int) (map[string]interface{},
 		}
 	}
 
+	// 添加调试日志
+	log.Printf("🔍 NovelConfig 查询结果: ID=%d, ClientID=%d, TTJumpHomeUrl=%s, TTLoginCallbackDomain=%s",
+		novelConfig.ID, novelConfig.ClientID, novelConfig.TTJumpHomeUrl, novelConfig.TTLoginCallbackDomain)
+
 	// 构建响应数据
 	response := map[string]interface{}{
 		"client": map[string]interface{}{

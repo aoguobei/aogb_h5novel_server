@@ -1,11 +1,9 @@
 package utils
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // FileUtils 文件操作工具类
@@ -230,232 +228,14 @@ func findMatchingBrace(content string, startIndex int) int {
 	return -1
 }
 
-// RemoveScriptsEntry 删除scripts中的指定条目
+// RemoveScriptsEntry 删除scripts中的指定条目（已废弃，使用按行删除）
 func (ju *JSONUtils) RemoveScriptsEntry(content, platformKey string) string {
-	// 查找scripts块
-	scriptsStart := findStringIndex(content, `"scripts": {`)
-	if scriptsStart == -1 {
-		return content
-	}
-
-	scriptsEnd := findMatchingBrace(content, scriptsStart)
-	if scriptsEnd == -1 {
-		return content
-	}
-
-	// 在scripts块中查找要删除的条目
-	devKey := fmt.Sprintf(`"dev:%s"`, platformKey)
-	buildKey := fmt.Sprintf(`"build:%s"`, platformKey)
-
-	// 找到要删除的条目的开始和结束位置
-	devStart := findStringIndexFrom(content, devKey, scriptsStart)
-	if devStart == -1 {
-		return content
-	}
-
-	// 找到dev条目的结束位置（下一个逗号或大括号）
-	devEnd := findScriptEntryEnd(content, devStart, scriptsEnd)
-
-	// 找到build条目的结束位置
-	buildStart := findStringIndexFrom(content, buildKey, scriptsStart)
-	var buildEnd int
-	if buildStart != -1 {
-		buildEnd = findScriptEntryEnd(content, buildStart, scriptsEnd)
-	} else {
-		buildEnd = -1
-	}
-
-	// 确定删除范围
-	deleteStart := devStart
-	deleteEnd := buildEnd
-	if buildEnd == -1 {
-		deleteEnd = devEnd
-	}
-
-	// 使用公共方法处理删除逻辑
-	return ju.removeEntryWithCommaHandling(content, deleteStart, deleteEnd, scriptsStart, scriptsEnd)
+	return content
 }
 
-// RemoveUniAppScriptsEntry 删除uni-app.scripts中的指定条目
+// RemoveUniAppScriptsEntry 删除uni-app.scripts中的指定条目（已废弃，使用按行删除）
 func (ju *JSONUtils) RemoveUniAppScriptsEntry(content, platformKey string) string {
-	// 查找uni-app.scripts块
-	uniAppStart := findStringIndex(content, `"uni-app": {`)
-	if uniAppStart == -1 {
-		return content
-	}
-
-	scriptsStart := findStringIndexFrom(content, `"scripts": {`, uniAppStart)
-	if scriptsStart == -1 {
-		return content
-	}
-
-	scriptsEnd := findMatchingBrace(content, scriptsStart)
-	if scriptsEnd == -1 {
-		return content
-	}
-
-	// 在uni-app.scripts块中查找要删除的条目
-	platformKeyQuoted := fmt.Sprintf(`"%s"`, platformKey)
-
-	// 找到要删除的条目的开始位置
-	entryStart := findStringIndexFrom(content, platformKeyQuoted, scriptsStart)
-	if entryStart == -1 {
-		return content
-	}
-
-	// 找到条目的结束位置（整个配置对象）
-	entryEnd := findUniAppScriptEntryEnd(content, entryStart, scriptsEnd)
-
-	// 使用公共方法处理删除逻辑
-	return ju.removeEntryWithCommaHandling(content, entryStart, entryEnd, scriptsStart, scriptsEnd)
+	return content
 }
 
-// findScriptEntryEnd 找到scripts条目的结束位置
-func findScriptEntryEnd(content string, startIndex, scriptsEnd int) int {
-	// 从开始位置向后查找，直到找到下一个逗号或大括号
-	// 需要跳过JSON字符串内部的逗号
-	inString := false
-	escapeNext := false
-
-	for i := startIndex; i < scriptsEnd; i++ {
-		char := content[i]
-
-		if escapeNext {
-			escapeNext = false
-			continue
-		}
-
-		if char == '\\' {
-			escapeNext = true
-			continue
-		}
-
-		if char == '"' {
-			inString = !inString
-			continue
-		}
-
-		// 只有在不在字符串内部时才处理逗号和大括号
-		if !inString {
-			if char == ',' {
-				return i + 1
-			} else if char == '}' {
-				return i
-			}
-		}
-	}
-	return scriptsEnd
-}
-
-// findUniAppScriptEntryEnd 找到uni-app.scripts条目的结束位置
-func findUniAppScriptEntryEnd(content string, startIndex, scriptsEnd int) int {
-	// 找到配置对象的开始大括号
-	braceStart := findStringIndexFrom(content, "{", startIndex)
-	if braceStart == -1 {
-		return startIndex
-	}
-
-	// 找到配置对象的结束大括号
-	braceEnd := findMatchingBrace(content, braceStart)
-	if braceEnd == -1 {
-		return startIndex
-	}
-
-	// 返回配置对象结束后的位置
-	return braceEnd + 1
-}
-
-// removeEntryWithCommaHandling 公共方法：处理删除条目时的逗号逻辑
-func (ju *JSONUtils) removeEntryWithCommaHandling(content string, deleteStart, deleteEnd, scriptsStart, scriptsEnd int) string {
-	// 检查删除范围后面是否有逗号，如果有则包含在删除范围内
-	if deleteEnd < len(content) && content[deleteEnd] == ',' {
-		deleteEnd++
-	}
-
-	// 检查删除范围前面是否有逗号，如果有则包含在删除范围内
-	// 从删除开始位置向前查找最近的逗号
-	if deleteStart > 0 {
-		// 向前查找最近的逗号，但要确保不在字符串内部
-		inString := false
-		escapeNext := false
-		for i := deleteStart - 1; i >= scriptsStart; i-- {
-			char := content[i]
-
-			if escapeNext {
-				escapeNext = false
-				continue
-			}
-
-			if char == '\\' {
-				escapeNext = true
-				continue
-			}
-
-			if char == '"' {
-				inString = !inString
-				continue
-			}
-
-			// 只有在不在字符串内部时才处理逗号
-			if !inString {
-				if char == ',' {
-					// 找到逗号，检查逗号后面是否只有空白字符
-					// 如果逗号后面直接是要删除的内容，则包含这个逗号
-					afterComma := strings.TrimSpace(content[i+1 : deleteStart])
-					if afterComma == "" {
-						// 检查删除范围后面是否还有内容（不是最后一个条目）
-						// 从删除结束位置向后查找，看是否还有其他内容
-						hasMoreContent := false
-						inStringAfter := false
-						escapeNextAfter := false
-
-						for j := deleteEnd; j < scriptsEnd; j++ {
-							charAfter := content[j]
-
-							if escapeNextAfter {
-								escapeNextAfter = false
-								continue
-							}
-
-							if charAfter == '\\' {
-								escapeNextAfter = true
-								continue
-							}
-
-							if charAfter == '"' {
-								inStringAfter = !inStringAfter
-								continue
-							}
-
-							// 只有在不在字符串内部时才处理
-							if !inStringAfter {
-								if charAfter == '"' {
-									// 找到了下一个内容的开始引号，说明还有更多内容
-									hasMoreContent = true
-									break
-								} else if charAfter == '}' {
-									// 遇到了结束大括号，说明没有更多内容了
-									break
-								}
-							}
-						}
-
-						// 只有在没有更多内容时才删除前面的逗号
-						if !hasMoreContent {
-							deleteStart = i
-						}
-					}
-					break
-				} else if char == '{' {
-					// 遇到大括号，停止查找
-					break
-				}
-			}
-		}
-	}
-
-	// 删除条目
-	newContent := content[:deleteStart] + content[deleteEnd:]
-
-	return newContent
-}
+// 这些方法已废弃，使用简化的按行删除逻辑
