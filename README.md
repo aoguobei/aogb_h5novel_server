@@ -43,13 +43,21 @@ backend/
 ├── services/              # 业务逻辑层
 │   ├── brand_service.go   # 品牌服务
 │   ├── client_service.go  # 客户端服务
-│   ├── config_service.go  # 配置服务
+│   ├── base_config_service.go    # 基础配置服务
+│   ├── common_config_service.go  # 通用配置服务
+│   ├── pay_config_service.go     # 支付配置服务
+│   ├── ui_config_service.go      # UI配置服务
+│   ├── novel_config_service.go   # 小说配置服务
 │   ├── file_service.go    # 文件服务
-│   ├── config_generator_service.go  # 配置生成服务
 │   └── website_service.go # 网站服务
 ├── utils/                 # 工具函数
 │   ├── response_utils.go  # 响应工具
-│   └── rollback_manager.go # 回滚管理器
+│   ├── file_utils.go      # 文件工具
+│   ├── config_file_manager.go    # 配置文件管理器
+│   └── rollback/          # 回滚机制
+│       ├── database_rollback.go  # 数据库回滚
+│       ├── file_rollback.go      # 文件回滚
+│       └── rollback_manager.go   # 回滚管理器
 ├── go.mod                 # Go模块文件
 ├── go.sum                 # 依赖校验文件
 ├── main.go               # 主程序入口
@@ -76,15 +84,24 @@ backend/
 - **小说配置 (NovelConfig)**：小说相关配置
 
 ### 4. 网站服务 (Website)
-- 网站创建流程
+- 网站创建流程（原子操作）
 - 配置文件自动生成
 - 文件操作和备份
-- 回滚机制
+- 完整的回滚机制
+- 支持多种平台（H5、TTH5、KSH5等）
 
 ### 5. 文件服务 (File)
 - 项目文件管理
-- 配置文件生成
+- 配置文件生成和修改
 - 文件备份和恢复
+- JSON文件操作（package.json、vite.config.js等）
+- 目录结构管理
+
+### 6. 回滚机制 (Rollback)
+- 数据库事务回滚
+- 文件操作回滚
+- 原子操作保证
+- 完整的备份恢复机制
 
 ## API接口文档
 
@@ -129,6 +146,11 @@ DELETE /api/brands/:id
 GET /api/clients
 ```
 
+#### 获取品牌下的客户端
+```
+GET /api/brands/:brandId/clients
+```
+
 #### 创建客户端
 ```
 POST /api/clients
@@ -138,6 +160,11 @@ Content-Type: application/json
   "brand_id": 1,
   "host": "h5"
 }
+```
+
+#### 删除客户端
+```
+DELETE /api/clients/:id
 ```
 
 ### 配置相关接口
@@ -243,6 +270,11 @@ Content-Type: application/json
 GET /api/website-config/:clientId
 ```
 
+#### 删除网站
+```
+DELETE /api/website/:clientId
+```
+
 ## 数据库设计
 
 ### 主要数据表
@@ -331,6 +363,8 @@ go run main.go
 - 使用统一的错误响应格式
 - 数据库操作要有事务处理
 - 文件操作要有回滚机制
+- 原子操作保证数据一致性
+- 完整的日志记录和错误追踪
 
 ## 部署说明
 
@@ -399,18 +433,24 @@ CMD ["./brand-config-api"]
 A: 在models/configs.go中添加新的结构体，在services中添加对应的服务，在handlers中添加处理器。
 
 ### Q: 如何修改文件生成逻辑？
-A: 修改services/file_service.go和services/config_generator_service.go中的相关方法。
+A: 修改services/file_service.go中的相关方法，包括JSON文件操作、配置文件生成等。
 
 ### Q: 如何扩展API接口？
 A: 在routes/routes.go中添加新的路由，在handlers中添加对应的处理方法。
 
 ## 更新日志
 
+### v1.1.0
+- 完善回滚机制
+- 优化文件操作
+- 增强错误处理
+- 支持多种平台配置
+
 ### v1.0.0
 - 初始版本发布
 - 基础CRUD功能
 - 文件生成功能
-- 回滚机制
+- 基础回滚机制
 
 ## 贡献指南
 

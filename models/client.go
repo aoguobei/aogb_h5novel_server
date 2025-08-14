@@ -7,10 +7,10 @@ import (
 // Client 客户端模型
 type Client struct {
 	ID        int       `json:"id" gorm:"primaryKey"`
-	BrandID   int       `json:"brand_id" gorm:"not null"`              // 关联的品牌ID
-	Host      string    `json:"host" gorm:"type:varchar(20);not null"` // 端类型：h5/tth5/ksh5
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	BrandID   int       `json:"brand_id" gorm:"column:brand_id;not null"`          // 关联的品牌ID
+	Host      string    `json:"host" gorm:"column:host;type:varchar(20);not null"` // 端类型：h5/tth5/ksh5
+	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`
 
 	// 关联关系
 	Brand         Brand          `json:"brand" gorm:"foreignKey:BrandID"`

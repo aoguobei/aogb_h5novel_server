@@ -34,17 +34,17 @@ func (s *FileService) UpdateProjectConfigs(brandCode, host string, scriptBase st
 	// 所以这里不调用 updateHostFileForBrand
 
 	// 更新index.js文件
-	if err := s.updateIndexFileForBrand(brandCode); err != nil {
+	if err := s.updateIndexFileForBrand(brandCode, fileManager); err != nil {
 		return err
 	}
 
 	// 更新vite.config.js
-	if err := s.updateViteConfigFile(brandCode, host, scriptBase); err != nil {
+	if err := s.updateViteConfigFile(brandCode, host, scriptBase, fileManager); err != nil {
 		return err
 	}
 
 	// 更新package.json
-	if err := s.updatePackageJSONFile(brandCode, host, appName); err != nil {
+	if err := s.updatePackageJSONFile(brandCode, host, appName, fileManager); err != nil {
 		return err
 	}
 
@@ -69,6 +69,9 @@ func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host
 
 	// 如果manifest.json不存在，创建它
 	if !manifestExists {
+		// 标记为新创建文件（如果失败需要删除）
+		fileManager.Backup(manifestFile, "")
+
 		manifestContent := fmt.Sprintf(`{
 	"name": "%s",
 	"appid": "",
@@ -108,6 +111,9 @@ func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host
 
 	// 如果pages-host.json不存在，创建它
 	if !pagesExists {
+		// 标记为新创建文件（如果失败需要删除）
+		fileManager.Backup(pagesFile, "")
+
 		pagesContent := fmt.Sprintf(`{
   "pages": [
     {
@@ -172,6 +178,11 @@ func (s *FileService) CreateStaticImageDirectory(brandCode string, fileManager *
 		return nil
 	}
 
+	// 备份目标目录（如果存在）
+	if err := fileManager.Backup(targetDir, ""); err != nil {
+		return fmt.Errorf("failed to backup target directory: %v", err)
+	}
+
 	// 创建目标目录
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("failed to create target directory: %v", err)
@@ -186,7 +197,12 @@ func (s *FileService) CreateStaticImageDirectory(brandCode string, fileManager *
 }
 
 // updateViteConfigFile 更新vite.config.js文件
-func (s *FileService) updateViteConfigFile(brandCode, host string, scriptBase string) error {
+func (s *FileService) updateViteConfigFile(brandCode, host string, scriptBase string, fileManager *rollback.FileRollback) error {
+	// 备份文件
+	if err := fileManager.Backup(s.config.File.ViteConfigFile, ""); err != nil {
+		return fmt.Errorf("failed to backup vite.config.js: %v", err)
+	}
+
 	content, err := os.ReadFile(s.config.File.ViteConfigFile)
 	if err != nil {
 		return fmt.Errorf("failed to read vite.config.js: %v", err)
@@ -228,7 +244,12 @@ func (s *FileService) updateViteConfigFile(brandCode, host string, scriptBase st
 }
 
 // updatePackageJSONFile 更新package.json文件
-func (s *FileService) updatePackageJSONFile(brandCode, host string, appName string) error {
+func (s *FileService) updatePackageJSONFile(brandCode, host string, appName string, fileManager *rollback.FileRollback) error {
+	// 备份文件
+	if err := fileManager.Backup(s.config.File.PackageFile, ""); err != nil {
+		return fmt.Errorf("failed to backup package.json: %v", err)
+	}
+
 	content, err := os.ReadFile(s.config.File.PackageFile)
 	if err != nil {
 		return fmt.Errorf("failed to read package.json: %v", err)
@@ -382,8 +403,13 @@ func (s *FileService) UpdateHostFileForBrand(brandCode string) error {
 }
 
 // updateIndexFileForBrand 更新 index.js 文件，添加新的 brand 配置
-func (s *FileService) updateIndexFileForBrand(brandCode string) error {
+func (s *FileService) updateIndexFileForBrand(brandCode string, fileManager *rollback.FileRollback) error {
 	fmt.Printf("🔄 Starting updateIndexFileForBrand for brand: %s\n", brandCode)
+
+	// 备份文件
+	if err := fileManager.Backup(s.config.File.IndexFile, ""); err != nil {
+		return fmt.Errorf("failed to backup index.js: %v", err)
+	}
 
 	// 使用配置文件中的IndexFile路径
 

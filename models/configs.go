@@ -13,7 +13,7 @@ type BaseConfig struct {
 	AppCode   string    `json:"app_code" gorm:"type:varchar(100);not null"`
 	Product   string    `json:"product" gorm:"type:varchar(50);not null"`
 	Customer  string    `json:"customer" gorm:"type:varchar(100);not null"`
-	AppID     string    `json:"appid" gorm:"type:varchar(100);default:''"`
+	AppID     string    `json:"appid" gorm:"column:appid;type:varchar(100);default:''"`
 	Version   string    `json:"version" gorm:"type:varchar(20);default:'1.0.0'"`
 	CL        string    `json:"cl" gorm:"type:varchar(100);not null"`
 	UC        string    `json:"uc" gorm:"type:varchar(100);default:''"`
