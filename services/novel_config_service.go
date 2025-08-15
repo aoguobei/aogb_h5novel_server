@@ -72,7 +72,14 @@ func (s *NovelConfigService) generateConfigFile(ctx *rollback.TransactionContext
 		if err := ctx.Files.Backup(configFile, ""); err != nil {
 			return fmt.Errorf("failed to backup file: %v", err)
 		}
-	} else if !os.IsNotExist(err) {
+		log.Printf("📝 备份已存在的配置文件: %s", configFile)
+	} else if os.IsNotExist(err) {
+		// 文件不存在，标记为新创建文件
+		if err := ctx.Files.Backup(configFile, ""); err != nil {
+			return fmt.Errorf("failed to backup new file: %v", err)
+		}
+		log.Printf("📝 标记新创建的配置文件: %s", configFile)
+	} else {
 		// 其他错误
 		return fmt.Errorf("failed to check file existence: %v", err)
 	}
@@ -206,7 +213,7 @@ func (s *NovelConfigService) UpdateNovelConfigByClientID(clientID int, novelConf
 		log.Printf("📁 文件路径: %s", configFile)
 		log.Printf("📝 更新的配置: %+v", hostConfig)
 		return nil
-	})
+	}, nil)
 }
 
 // DeleteNovelConfigByClientID 根据client_id删除小说配置（独立事务）
@@ -216,7 +223,7 @@ func (s *NovelConfigService) DeleteNovelConfigByClientID(clientID int) error {
 
 	return rollbackManager.ExecuteWithTransaction(func(ctx *rollback.TransactionContext) error {
 		return s.deleteNovelConfigInternal(ctx, clientID)
-	})
+	}, nil)
 }
 
 // deleteNovelConfigInternal 内部删除小说配置方法（不管理事务）

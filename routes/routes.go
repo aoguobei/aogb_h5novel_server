@@ -2,14 +2,25 @@ package routes
 
 import (
 	"brand-config-api/handlers"
+	"brand-config-api/utils"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
+// 全局管理器实例
+var (
+	wsManager   *utils.WebSocketManager
+	taskManager *utils.TaskManager
+)
+
 // SetupRoutes 设置路由
 func SetupRoutes() *gin.Engine {
 	r := gin.Default()
+
+	// 初始化全局管理器
+	wsManager = utils.NewWebSocketManager()
+	taskManager = utils.NewTaskManager(5) // 最多5个并发任务
 
 	// CORS配置
 	config := cors.DefaultConfig()
@@ -21,12 +32,17 @@ func SetupRoutes() *gin.Engine {
 	// 创建控制器实例
 	brandHandler := handlers.NewBrandHandler()
 	clientHandler := handlers.NewClientHandler()
-	websiteHandler := handlers.NewWebsiteHandler()
+	websiteHandler := handlers.NewWebsiteHandler(wsManager, taskManager)
 	baseConfigHandler := handlers.NewBaseConfigHandler()
 	commonConfigHandler := handlers.NewCommonConfigHandler()
 	payConfigHandler := handlers.NewPayConfigHandler()
 	uiConfigHandler := handlers.NewUIConfigHandler()
 	novelConfigHandler := handlers.NewNovelConfigHandler()
+	websocketHandler := handlers.NewWebSocketHandler(wsManager, taskManager)
+
+	// WebSocket路由
+	r.GET("/ws", websocketHandler.HandleWebSocket)
+	r.GET("/api/task/:taskId", websocketHandler.GetTaskStatus)
 
 	// API路由组
 	api := r.Group("/api")

@@ -3,7 +3,6 @@ package services
 import (
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 
 	"brand-config-api/config"
@@ -74,38 +73,11 @@ func (s *CommonConfigService) CreateCommonConfigWithFile(ctx *rollback.Transacti
 // generateConfigFile 生成通用配置文件（不管理事务）
 func (s *CommonConfigService) generateConfigFile(ctx *rollback.TransactionContext, commonConfig *models.CommonConfig, brandCode, host string) error {
 	configFile := filepath.Join(s.config.File.CommonConfigsDir, brandCode+".js")
-
-	// 检查文件是否存在，如果存在则备份
-	if _, err := os.Stat(configFile); err == nil {
-		// 文件存在，进行备份
-		if err := ctx.Files.Backup(configFile, ""); err != nil {
-			return fmt.Errorf("failed to backup file: %v", err)
-		}
-	} else if !os.IsNotExist(err) {
-		// 其他错误
-		return fmt.Errorf("failed to check file existence: %v", err)
-	}
-
-	// 读取现有配置文件或创建新的配置对象
-	configfileManager := utils.NewConfigFileManager()
-	configData, err := configfileManager.ReadConfigFile(configFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// 文件不存在，创建新的配置对象
-			configData = make(map[string]interface{})
-			log.Printf("📄 配置文件不存在，创建新的配置: %s", configFile)
-		} else {
-			return fmt.Errorf("failed to read existing config file: %v", err)
-		}
-	}
-
-	// 更新指定host的配置
 	hostConfig := s.FormatCommonConfig(*commonConfig)
-	configData[host] = hostConfig
 
-	// 写入文件
-	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
-		return fmt.Errorf("failed to write config file: %v", err)
+	configFileUtils := utils.NewConfigFileUtils()
+	if err := configFileUtils.GenerateConfigFile(ctx, configFile, hostConfig, host); err != nil {
+		return fmt.Errorf("failed to generate config file: %v", err)
 	}
 
 	log.Printf("✅ 通用配置文件生成成功: brand=%s, host=%s", brandCode, host)
@@ -119,7 +91,7 @@ func (s *CommonConfigService) DeleteCommonConfigByClientID(clientID int) error {
 
 	return rollbackManager.ExecuteWithTransaction(func(ctx *rollback.TransactionContext) error {
 		return s.deleteCommonConfigInternal(ctx, clientID)
-	})
+	}, nil)
 }
 
 // deleteCommonConfigInternal 内部删除通用配置方法（不管理事务）
@@ -139,31 +111,9 @@ func (s *CommonConfigService) deleteCommonConfigInternal(ctx *rollback.Transacti
 	// 处理配置文件
 	configFile := filepath.Join(s.config.File.CommonConfigsDir, brand.Code+".js")
 
-	// 检查文件是否存在
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		return nil
-	}
-
-	// 备份文件
-	if err := ctx.Files.Backup(configFile, ""); err != nil {
-		return fmt.Errorf("failed to backup file: %v", err)
-	}
-
-	// 读取现有配置文件
-	configfileManager := utils.NewConfigFileManager()
-	configData, err := configfileManager.ReadConfigFile(configFile)
-	if err != nil {
-		return fmt.Errorf("failed to read existing config file: %v", err)
-	}
-
-	// 删除指定host的配置
-	if _, exists := configData[client.Host]; exists {
-		delete(configData, client.Host)
-	}
-
-	// 写入更新后的配置文件
-	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
-		return fmt.Errorf("failed to write config file: %v", err)
+	configFileUtils := utils.NewConfigFileUtils()
+	if err := configFileUtils.DeleteConfigFileHost(ctx, configFile, client.Host); err != nil {
+		return fmt.Errorf("failed to delete config file host: %v", err)
 	}
 
 	return nil
@@ -254,31 +204,15 @@ func (s *CommonConfigService) UpdateCommonConfigByClientID(clientID int, commonC
 		}
 
 		// 更新本地配置文件
-		// 构建文件路径
 		configFile := filepath.Join(s.config.File.CommonConfigsDir, brand.Code+".js")
-
-		// 备份文件
-		if err := ctx.Files.Backup(configFile, ""); err != nil {
-			return fmt.Errorf("failed to backup file: %v", err)
-		}
-
-		// 读取现有配置文件
-		configfileManager := utils.NewConfigFileManager()
-		configData, err := configfileManager.ReadConfigFile(configFile)
-		if err != nil {
-			return fmt.Errorf("failed to read existing config file: %v", err)
-		}
-
-		// 更新指定host的配置
 		hostConfig := s.FormatCommonConfig(commonConfig)
-		configData[client.Host] = hostConfig
 
-		// 写入文件
-		if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
-			return fmt.Errorf("failed to write config file: %v", err)
+		configFileUtils := utils.NewConfigFileUtils()
+		if err := configFileUtils.UpdateConfigFileHost(ctx, configFile, hostConfig, client.Host); err != nil {
+			return fmt.Errorf("failed to update config file host: %v", err)
 		}
 
 		log.Printf("✅ 通用配置更新成功: brand=%s, host=%s", brand.Code, client.Host)
 		return nil
-	})
+	}, nil)
 }

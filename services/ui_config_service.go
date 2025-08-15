@@ -66,38 +66,11 @@ func (s *UIConfigService) CreateUIConfigWithFile(ctx *rollback.TransactionContex
 // generateConfigFile 生成UI配置文件（不管理事务）
 func (s *UIConfigService) generateConfigFile(ctx *rollback.TransactionContext, uiConfig *models.UIConfig, brandCode, host string) error {
 	configFile := filepath.Join(s.config.File.UIConfigsDir, brandCode+".js")
-
-	// 检查文件是否存在，如果存在则备份
-	if _, err := os.Stat(configFile); err == nil {
-		// 文件存在，进行备份
-		if err := ctx.Files.Backup(configFile, ""); err != nil {
-			return fmt.Errorf("failed to backup file: %v", err)
-		}
-	} else if !os.IsNotExist(err) {
-		// 其他错误
-		return fmt.Errorf("failed to check file existence: %v", err)
-	}
-
-	// 读取现有配置文件或创建新的配置对象
-	configfileManager := utils.NewConfigFileManager()
-	configData, err := configfileManager.ReadConfigFile(configFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// 文件不存在，创建新的配置对象
-			configData = make(map[string]interface{})
-			log.Printf("📄 配置文件不存在，创建新的配置: %s", configFile)
-		} else {
-			return fmt.Errorf("failed to read existing config file: %v", err)
-		}
-	}
-
-	// 更新指定host的配置
 	hostConfig := s.FormatUIConfig(*uiConfig)
-	configData[host] = hostConfig
 
-	// 写入文件
-	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
-		return fmt.Errorf("failed to write config file: %v", err)
+	configFileUtils := utils.NewConfigFileUtils()
+	if err := configFileUtils.GenerateConfigFile(ctx, configFile, hostConfig, host); err != nil {
+		return fmt.Errorf("failed to generate config file: %v", err)
 	}
 
 	log.Printf("✅ UI配置文件生成成功: brand=%s, host=%s", brandCode, host)
@@ -180,7 +153,7 @@ func (s *UIConfigService) UpdateUIConfigByClientID(clientID int, uiConfig models
 
 		log.Printf("✅ UI配置更新成功: brand=%s, host=%s", brand.Code, client.Host)
 		return nil
-	})
+	}, nil)
 }
 
 // DeleteUIConfigByClientID 根据client_id删除UI配置（独立事务）
@@ -190,7 +163,7 @@ func (s *UIConfigService) DeleteUIConfigByClientID(clientID int) error {
 
 	return rollbackManager.ExecuteWithTransaction(func(ctx *rollback.TransactionContext) error {
 		return s.deleteUIConfigInternal(ctx, clientID)
-	})
+	}, nil)
 }
 
 // deleteUIConfigInternal 内部删除UI配置方法（不管理事务）

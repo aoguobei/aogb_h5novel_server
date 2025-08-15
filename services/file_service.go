@@ -55,6 +55,21 @@ func (s *FileService) UpdateProjectConfigs(brandCode, host string, scriptBase st
 func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host string, fileManager *rollback.FileRollback) error {
 	brandDir := s.config.GetPrebuildPath(brandCode)
 
+	// 检查品牌目录是否存在
+	if _, err := os.Stat(brandDir); err == nil {
+		// 目录已存在，备份它以便回滚时删除
+		if err := fileManager.Backup(brandDir, ""); err != nil {
+			return fmt.Errorf("failed to backup existing brand directory: %v", err)
+		}
+		log.Printf("📝 备份已存在的品牌目录: %s", brandDir)
+	} else {
+		// 目录不存在，标记为新创建
+		if err := fileManager.Backup(brandDir, ""); err != nil {
+			return fmt.Errorf("failed to backup brand directory: %v", err)
+		}
+		log.Printf("📝 标记新创建的品牌目录: %s", brandDir)
+	}
+
 	// 确保品牌目录存在
 	if err := os.MkdirAll(brandDir, 0755); err != nil {
 		return fmt.Errorf("failed to create brand directory: %v", err)
@@ -70,7 +85,9 @@ func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host
 	// 如果manifest.json不存在，创建它
 	if !manifestExists {
 		// 标记为新创建文件（如果失败需要删除）
-		fileManager.Backup(manifestFile, "")
+		if err := fileManager.Backup(manifestFile, ""); err != nil {
+			return fmt.Errorf("failed to backup manifest file: %v", err)
+		}
 
 		manifestContent := fmt.Sprintf(`{
 	"name": "%s",
@@ -112,7 +129,9 @@ func (s *FileService) CreatePrebuildFiles(brandCode string, appName string, host
 	// 如果pages-host.json不存在，创建它
 	if !pagesExists {
 		// 标记为新创建文件（如果失败需要删除）
-		fileManager.Backup(pagesFile, "")
+		if err := fileManager.Backup(pagesFile, ""); err != nil {
+			return fmt.Errorf("failed to backup pages file: %v", err)
+		}
 
 		pagesContent := fmt.Sprintf(`{
   "pages": [
@@ -175,12 +194,17 @@ func (s *FileService) CreateStaticImageDirectory(brandCode string, fileManager *
 
 	// 检查目标目录是否已存在
 	if _, err := os.Stat(targetDir); err == nil {
-		return nil
-	}
-
-	// 备份目标目录（如果存在）
-	if err := fileManager.Backup(targetDir, ""); err != nil {
-		return fmt.Errorf("failed to backup target directory: %v", err)
+		// 目录已存在，备份它以便回滚时删除
+		if err := fileManager.Backup(targetDir, ""); err != nil {
+			return fmt.Errorf("failed to backup existing target directory: %v", err)
+		}
+		log.Printf("📝 备份已存在的目标目录: %s", targetDir)
+	} else {
+		// 目录不存在，标记为新创建
+		if err := fileManager.Backup(targetDir, ""); err != nil {
+			return fmt.Errorf("failed to backup target directory: %v", err)
+		}
+		log.Printf("📝 标记新创建的目标目录: %s", targetDir)
 	}
 
 	// 创建目标目录
@@ -188,9 +212,48 @@ func (s *FileService) CreateStaticImageDirectory(brandCode string, fileManager *
 		return fmt.Errorf("failed to create target directory: %v", err)
 	}
 
-	// 拷贝目录内容
-	if err := s.fileUtils.CopyDirectory(sourceDir, targetDir); err != nil {
+	// 拷贝目录内容（通过回滚管理器跟踪）
+	if err := s.copyDirectoryWithRollback(sourceDir, targetDir, fileManager); err != nil {
 		return fmt.Errorf("failed to copy directory content: %v", err)
+	}
+
+	return nil
+}
+
+// copyDirectoryWithRollback 递归拷贝目录内容，并通过回滚管理器跟踪所有创建的文件
+func (s *FileService) copyDirectoryWithRollback(src, dst string, fileManager *rollback.FileRollback) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			// 创建子目录
+			if err := os.MkdirAll(dstPath, 0755); err != nil {
+				return err
+			}
+			// 标记子目录为需要回滚删除
+			if err := fileManager.Backup(dstPath, ""); err != nil {
+				return fmt.Errorf("failed to backup subdirectory: %v", err)
+			}
+			// 递归拷贝子目录
+			if err := s.copyDirectoryWithRollback(srcPath, dstPath, fileManager); err != nil {
+				return err
+			}
+		} else {
+			// 标记文件为需要回滚删除
+			if err := fileManager.Backup(dstPath, ""); err != nil {
+				return fmt.Errorf("failed to backup file: %v", err)
+			}
+			// 拷贝文件
+			if err := s.fileUtils.CopyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -572,35 +635,39 @@ func (s *FileService) removePackageJSONEntries(brandCode, host string, fileManag
 	lines := strings.Split(contentStr, "\n")
 	var newLines []string
 	skipMode := false
-	braceCount := 0
+	titleFound := false
 
 	for _, line := range lines {
-
-		// 检查是否进入删除模式
+		// 检查是否进入删除模式 - 找到配置块开始
 		if strings.Contains(line, fmt.Sprintf(`"%s": {`, platformKey)) {
 			skipMode = true
-			braceCount = 1
+			titleFound = false
 			log.Printf("🗑️ 开始删除uni-app.scripts配置块: %s", platformKey)
 			continue
 		}
 
 		// 如果在删除模式中
 		if skipMode {
-			// 计算大括号数量
-			for _, char := range line {
-				if char == '{' {
-					braceCount++
-				} else if char == '}' {
-					braceCount--
-					// 当大括号数量归零时，退出删除模式
-					if braceCount == 0 {
-						skipMode = false
-						log.Printf("🗑️ 完成删除uni-app.scripts配置块: %s", platformKey)
-						continue
-					}
-				}
+			// 检查是否找到 title: 字段
+			if strings.Contains(line, `"title":`) {
+				titleFound = true
+				log.Printf("🗑️ 找到title字段，继续删除")
+				continue
 			}
-			// 跳过当前行
+
+			// 如果已经找到title，继续删除直到遇到结束的大括号和逗号
+			if titleFound {
+				// 检查是否遇到结束的大括号和逗号（如 }, 或 }）
+				if strings.Contains(strings.TrimSpace(line), "}") && (strings.Contains(line, ",") || strings.TrimSpace(line) == "}") {
+					log.Printf("🗑️ 找到配置块结束，完成删除: %s", platformKey)
+					skipMode = false
+					continue
+				}
+				// 继续删除当前行
+				continue
+			}
+
+			// 跳过当前行（继续删除）
 			continue
 		}
 

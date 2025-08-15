@@ -92,52 +92,136 @@ func NewWebsiteService() *WebsiteService {
 	}
 }
 
-// CreateWebsite 创建网站
-func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest) (map[string]interface{}, error) {
+// CreateWebsite 创建网站（带进度回调）
+func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest, progressCallback func(int, string, string)) (map[string]interface{}, error) {
 	// 创建回滚管理器
 	rollbackManager := rollback.NewRollbackManager(s.db, s.config)
 
 	var result map[string]interface{}
 
+	// 使用defer确保回滚进度被正确处理
+	defer func() {
+		if r := recover(); r != nil {
+			if progressCallback != nil {
+				progressCallback(0, "系统错误", "发生系统错误，已进行回滚操作")
+			}
+		}
+	}()
+
 	err := rollbackManager.ExecuteWithTransaction(func(ctx *rollback.TransactionContext) error {
-		// 创建客户端
+		// 步骤1: 验证数据
+		if progressCallback != nil {
+			progressCallback(5, "验证数据...", "开始验证请求参数")
+		}
+
+		if err := s.validateRequest(req); err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "验证失败", "配置验证失败: "+err.Error())
+			}
+			return fmt.Errorf("validation failed: %v", err)
+		}
+
+		if progressCallback != nil {
+			progressCallback(10, "验证数据...", "数据验证通过")
+		}
+
+		// 步骤2: 创建客户端
+		if progressCallback != nil {
+			progressCallback(15, "创建网站Client...", "正在创建网站客户端")
+		}
+
 		client, err := s.createClient(ctx.DB, req.BasicInfo)
 		if err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "创建失败", "客户端创建失败: "+err.Error())
+			}
 			return fmt.Errorf("failed to create client: %v", err)
 		}
 
-		// 创建基础配置（包含文件生成）
+		if progressCallback != nil {
+			progressCallback(20, "创建网站Client...", "客户端创建成功")
+		}
+
+		// 步骤3: 创建基础配置
+		if progressCallback != nil {
+			progressCallback(25, "创建BaseConfig...", "开始创建基础配置")
+		}
+
 		baseConfigService := NewBaseConfigService()
 		baseConfig, err := baseConfigService.CreateBaseConfigWithFile(ctx, req.BaseConfig, int(client.ID), client.Brand.Code, client.Host)
 		if err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "创建失败", "基础配置创建失败: "+err.Error())
+			}
 			return fmt.Errorf("failed to create base config: %v", err)
 		}
 
-		// 创建通用配置（包含文件生成）
+		if progressCallback != nil {
+			progressCallback(30, "创建BaseConfig...", "基础配置创建成功")
+		}
+
+		// 步骤4: 创建通用配置
+		if progressCallback != nil {
+			progressCallback(35, "创建CommonConfig...", "开始创建通用配置")
+		}
+
 		commonConfigService := NewCommonConfigService()
 		commonConfig, err := commonConfigService.CreateCommonConfigWithFile(ctx, req.CommonConfig, int(client.ID), client.Brand.Code, client.Host)
 		if err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "创建失败", "通用配置创建失败: "+err.Error())
+			}
 			return fmt.Errorf("failed to create common config: %v", err)
 		}
 
-		// 创建支付配置（包含文件生成）
+		if progressCallback != nil {
+			progressCallback(40, "创建CommonConfig...", "通用配置创建成功")
+		}
+
+		// 步骤5: 创建支付配置
+		if progressCallback != nil {
+			progressCallback(45, "创建PayConfig...", "开始创建支付配置")
+		}
+
 		payConfigService := NewPayConfigService()
 		payConfig, err := payConfigService.CreatePayConfigWithFile(ctx, req.PayConfig, int(client.ID), client.Brand.Code, client.Host)
 		if err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "创建失败", "支付配置创建失败: "+err.Error())
+			}
 			return fmt.Errorf("failed to create pay config: %v", err)
 		}
 
-		// 创建UI配置（包含文件生成）
+		if progressCallback != nil {
+			progressCallback(50, "创建PayConfig...", "支付配置创建成功")
+		}
+
+		// 步骤6: 创建UI配置
+		if progressCallback != nil {
+			progressCallback(55, "创建UIConfig...", "开始创建UI配置")
+		}
+
 		uiConfigService := NewUIConfigService()
 		uiConfig, err := uiConfigService.CreateUIConfigWithFile(ctx, req.UIConfig, int(client.ID), client.Brand.Code, client.Host)
 		if err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "创建失败", "UI配置创建失败: "+err.Error())
+			}
 			return fmt.Errorf("failed to create UI config: %v", err)
 		}
 
-		// 创建额外客户端和基础配置（如果需要）
+		if progressCallback != nil {
+			progressCallback(60, "创建UIConfig...", "UI配置创建成功")
+		}
+
+		// 步骤7: 创建额外客户端和基础配置（如果需要）
 		var extraClient *models.Client
 		var extraBaseConfig *models.BaseConfig
 		if req.ExtraBaseConfig != nil {
+			if progressCallback != nil {
+				progressCallback(65, "创建额外客户端和基础配置...", "正在配置额外客户端")
+			}
+
 			// 确定额外的host类型
 			var extraHost string
 			if client.Host == "tth5" {
@@ -150,40 +234,94 @@ func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest) (map[string]in
 				// 创建额外的客户端
 				extraClient, err = s.createExtraClient(ctx.DB, client.Brand.ID, extraHost)
 				if err != nil {
+					if progressCallback != nil {
+						progressCallback(0, "创建失败", "额外客户端创建失败: "+err.Error())
+					}
 					return fmt.Errorf("failed to create extra client: %v", err)
 				}
 
 				// 创建额外的基础配置（包含文件生成）
 				extraBaseConfig, err = baseConfigService.CreateBaseConfigWithFile(ctx, *req.ExtraBaseConfig, int(extraClient.ID), client.Brand.Code, extraHost)
 				if err != nil {
+					if progressCallback != nil {
+						progressCallback(0, "创建失败", "额外基础配置创建失败: "+err.Error())
+					}
 					return fmt.Errorf("failed to create extra base config: %v", err)
 				}
 			}
-		}
 
-		// 创建小说配置（如果存在，包含文件生成）
-		var novelConfig *models.NovelConfig
-		if req.NovelConfig != nil {
-			novelConfigService := NewNovelConfigService()
-			novelConfig, err = novelConfigService.CreateNovelConfigWithFile(ctx, *req.NovelConfig, int(client.ID), client.Brand.Code, client.Host)
-			if err != nil {
-				return fmt.Errorf("failed to create novel config: %v", err)
+			if progressCallback != nil {
+				progressCallback(70, "创建额外客户端BaseConfig...", "额外客户端"+extraHost+"基础配置创建成功")
 			}
 		}
 
-		// 更新项目配置文件
+		// 步骤8: 创建小说配置（如果存在）
+		var novelConfig *models.NovelConfig
+		if req.NovelConfig != nil {
+			if progressCallback != nil {
+				progressCallback(75, "创建小说特有配置NovelConfig...", "开始创建小说特有配置")
+			}
+
+			novelConfigService := NewNovelConfigService()
+			novelConfig, err = novelConfigService.CreateNovelConfigWithFile(ctx, *req.NovelConfig, int(client.ID), client.Brand.Code, client.Host)
+			if err != nil {
+				if progressCallback != nil {
+					progressCallback(0, "创建失败", "小说配置创建失败: "+err.Error())
+				}
+				return fmt.Errorf("failed to create novel config: %v", err)
+			}
+
+			if progressCallback != nil {
+				progressCallback(80, "创建小说特有配置NovelConfig...", "小说特有配置创建成功")
+			}
+		}
+
+		// 步骤9: 更新项目配置文件
+		if progressCallback != nil {
+			progressCallback(85, "更新项目配置index.js、package.json、vite.config.js...", "开始更新项目配置文件")
+		}
+
 		if err := s.fileService.UpdateProjectConfigs(client.Brand.Code, client.Host, commonConfig.ScriptBase, baseConfig.AppName, ctx.Files); err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "更新失败", "项目配置文件更新失败: "+err.Error())
+			}
 			return fmt.Errorf("failed to update project configs: %v", err)
 		}
 
-		// 创建prebuild文件
+		if progressCallback != nil {
+			progressCallback(90, "更新项目配置...", "项目配置文件更新成功")
+		}
+
+		// 步骤10: 创建prebuild文件
+		if progressCallback != nil {
+			progressCallback(92, "创建预构建文件Prebuild...", "开始创建预构建文件")
+		}
+
 		if err := s.fileService.CreatePrebuildFiles(client.Brand.Code, baseConfig.AppName, client.Host, ctx.Files); err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "创建失败", "预构建文件创建失败: "+err.Error())
+			}
 			return fmt.Errorf("failed to create prebuild files: %v", err)
 		}
 
-		// 创建static图片目录
+		if progressCallback != nil {
+			progressCallback(95, "创建预构建文件...", "预构建文件创建成功")
+		}
+
+		// 步骤11: 创建static图片目录
+		if progressCallback != nil {
+			progressCallback(98, "创建静态资源Static...", "开始创建静态资源目录")
+		}
+
 		if err := s.fileService.CreateStaticImageDirectory(client.Brand.Code, ctx.Files); err != nil {
+			if progressCallback != nil {
+				progressCallback(0, "创建失败", "静态资源目录创建失败: "+err.Error())
+			}
 			return fmt.Errorf("failed to create static image directory: %v", err)
+		}
+
+		if progressCallback != nil {
+			progressCallback(100, "创建静态资源...", "静态资源目录创建成功")
 		}
 
 		// 构建返回结果
@@ -208,13 +346,69 @@ func (s *WebsiteService) CreateWebsite(req *CreateWebsiteRequest) (map[string]in
 		}
 
 		return nil
-	})
+	}, progressCallback)
 
 	if err != nil {
+		// 如果发生错误，通知进度回调
+		if progressCallback != nil {
+			progressCallback(0, "操作失败", "网站创建失败，已进行回滚操作")
+		}
 		return nil, err
 	}
 
 	return result, nil
+}
+
+// validateRequest 验证请求参数
+func (s *WebsiteService) validateRequest(req *CreateWebsiteRequest) error {
+	// 只验证关键的安全相关字段，减少与前端验证的重复
+
+	// 1. 验证品牌ID（防止越权访问）
+	if req.BasicInfo.BrandID <= 0 {
+		return fmt.Errorf("invalid brand_id")
+	}
+
+	// 2. 验证host类型（防止注入攻击）
+	validHosts := map[string]bool{"h5": true, "tth5": true, "ksh5": true}
+	if !validHosts[req.BasicInfo.Host] {
+		return fmt.Errorf("invalid host type")
+	}
+
+	// 3. 验证支付网关ID（业务逻辑验证）
+	if req.PayConfig.NormalPayEnable {
+		if req.PayConfig.NormalPayGatewayAndroid == nil || *req.PayConfig.NormalPayGatewayAndroid <= 0 {
+			return fmt.Errorf("normal_pay_gateway_android must be greater than 0 when normal_pay_enable is true")
+		}
+		if req.PayConfig.NormalPayGatewayIOS == nil || *req.PayConfig.NormalPayGatewayIOS <= 0 {
+			return fmt.Errorf("normal_pay_gateway_ios must be greater than 0 when normal_pay_enable is true")
+		}
+	}
+	if req.PayConfig.RenewPayEnable {
+		if req.PayConfig.RenewPayGatewayAndroid == nil || *req.PayConfig.RenewPayGatewayAndroid <= 0 {
+			return fmt.Errorf("renew_pay_gateway_android must be greater than 0 when renew_pay_enable is true")
+		}
+		if req.PayConfig.RenewPayGatewayIOS == nil || *req.PayConfig.RenewPayGatewayIOS <= 0 {
+			return fmt.Errorf("renew_pay_gateway_ios must be greater than 0 when renew_pay_enable is true")
+		}
+	}
+
+	// 4. 验证小说配置（tth5端是必填的）
+	if req.BasicInfo.Host == "tth5" {
+		if req.NovelConfig == nil {
+			return fmt.Errorf("novel_config is required for tth5 host")
+		}
+		if req.NovelConfig.TTJumpHomeUrl == "" {
+			return fmt.Errorf("tt_jump_home_url is required for tth5 host")
+		}
+		if req.NovelConfig.TTLoginCallbackDomain == "" {
+			return fmt.Errorf("tt_login_callback_domain is required for tth5 host")
+		}
+	}
+
+	// 5. 颜色格式验证已移除，支持任何格式的颜色值
+	// 包括 #RRGGBB, #RRGGBBAA, rgba(), rgb() 等格式
+
+	return nil
 }
 
 // GetWebsiteConfig 获取网站完整配置
@@ -365,7 +559,7 @@ func (s *WebsiteService) DeleteWebsite(clientID int) error {
 
 		log.Printf("✅ 网站删除成功: clientID=%d, brand=%s, host=%s", clientID, client.Brand.Code, client.Host)
 		return nil
-	})
+	}, nil)
 }
 
 // deleteWebsiteFiles 删除网站相关文件

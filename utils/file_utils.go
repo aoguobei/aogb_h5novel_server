@@ -1,9 +1,13 @@
 package utils
 
 import (
+	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+
+	"brand-config-api/utils/rollback"
 )
 
 // FileUtils 文件操作工具类
@@ -238,4 +242,109 @@ func (ju *JSONUtils) RemoveUniAppScriptsEntry(content, platformKey string) strin
 	return content
 }
 
-// 这些方法已废弃，使用简化的按行删除逻辑
+// ConfigFileUtils 配置文件操作工具
+type ConfigFileUtils struct{}
+
+// NewConfigFileUtils 创建配置文件操作工具实例
+func NewConfigFileUtils() *ConfigFileUtils {
+	return &ConfigFileUtils{}
+}
+
+// GenerateConfigFile 通用的配置文件生成方法
+func (cfu *ConfigFileUtils) GenerateConfigFile(ctx *rollback.TransactionContext, configFile string, hostConfig map[string]interface{}, host string) error {
+	// 检查文件是否存在，如果存在则备份
+	// 无论文件是否存在，都调用Backup方法（方法内部会自动判断）
+	if err := ctx.Files.Backup(configFile, ""); err != nil {
+		return fmt.Errorf("failed to backup file: %v", err)
+	}
+
+	// 根据文件状态记录日志
+	if _, err := os.Stat(configFile); err == nil {
+		log.Printf("📝 备份已存在的配置文件: %s", configFile)
+	} else if os.IsNotExist(err) {
+		log.Printf("📝 标记新创建的配置文件: %s", configFile)
+	} else {
+		// 其他错误
+		return fmt.Errorf("failed to check file existence: %v", err)
+	}
+
+	// 读取现有配置文件或创建新的配置对象
+	configfileManager := NewConfigFileManager()
+	configData, err := configfileManager.ReadConfigFile(configFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// 文件不存在，创建新的配置对象
+			configData = make(map[string]interface{})
+			log.Printf("📄 配置文件不存在，创建新的配置: %s", configFile)
+		} else {
+			return fmt.Errorf("failed to read existing config file: %v", err)
+		}
+	}
+
+	// 更新指定host的配置
+	configData[host] = hostConfig
+
+	// 写入文件
+	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
+		return fmt.Errorf("failed to write config file: %v", err)
+	}
+
+	return nil
+}
+
+// DeleteConfigFileHost 通用的删除配置文件指定host配置的方法
+func (cfu *ConfigFileUtils) DeleteConfigFileHost(ctx *rollback.TransactionContext, configFile string, host string) error {
+	// 检查文件是否存在
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		return nil
+	}
+
+	// 备份文件
+	if err := ctx.Files.Backup(configFile, ""); err != nil {
+		return fmt.Errorf("failed to backup file: %v", err)
+	}
+
+	// 读取现有配置文件
+	configfileManager := NewConfigFileManager()
+	configData, err := configfileManager.ReadConfigFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read existing config file: %v", err)
+	}
+
+	// 删除指定host的配置
+	if _, exists := configData[host]; exists {
+		delete(configData, host)
+	}
+
+	// 写入更新后的配置文件
+	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
+		return fmt.Errorf("failed to write config file: %v", err)
+	}
+
+	return nil
+}
+
+// UpdateConfigFileHost 通用的更新配置文件指定host配置的方法
+func (cfu *ConfigFileUtils) UpdateConfigFileHost(ctx *rollback.TransactionContext, configFile string, hostConfig map[string]interface{}, host string) error {
+	// 备份文件
+	if err := ctx.Files.Backup(configFile, ""); err != nil {
+		return fmt.Errorf("failed to backup file: %v", err)
+	}
+
+	// 读取现有配置文件
+	configfileManager := NewConfigFileManager()
+	configData, err := configfileManager.ReadConfigFile(configFile)
+	if err != nil {
+		return fmt.Errorf("failed to read existing config file: %v", err)
+	}
+
+	// 更新指定host的配置
+	configData[host] = hostConfig
+
+	// 写入文件
+	if err := configfileManager.WriteConfigDataToFile(configData, configFile); err != nil {
+		return fmt.Errorf("failed to write config file: %v", err)
+	}
+
+	return nil
+}
