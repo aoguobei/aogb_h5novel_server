@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 )
 
@@ -80,14 +79,6 @@ func Load() *Config {
 			LocalConfigsDir:  filepath.Join(basePath, "funNovel/src/appConfig/localConfigs"),
 		},
 	}
-}
-
-// getEnv 获取环境变量，如果不存在则返回默认值
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
 
 // GetConfigPath 获取配置文件路径

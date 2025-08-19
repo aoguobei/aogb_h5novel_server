@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 
 	"brand-config-api/config"
@@ -35,4 +36,13 @@ func main() {
 	if err := r.Run(":" + cfg.Server.Port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
+
+	// 启动服务器
+	port := cfg.Server.Port
+	fmt.Printf("🚀 服务启动成功！\n")
+	fmt.Printf("📧 邮件发送API(用户认证): http://localhost%s/api/email/send-user\n", port)
+	fmt.Printf("🌐 其他API: http://localhost%s/api/*\n", port)
+	fmt.Printf("按 Ctrl+C 停止服务\n\n")
+
+	log.Fatal(r.Run(port))
 }

@@ -129,5 +129,8 @@ func SetupRoutes() *gin.Engine {
 		api.DELETE("/website/:clientId", websiteHandler.DeleteWebsite)
 	}
 
+	// 设置邮件路由
+	SetupEmailRoutes(r)
+
 	return r
 }
