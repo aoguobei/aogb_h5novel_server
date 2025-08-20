@@ -70,13 +70,6 @@ func (h *BrandHandler) CreateBrand(c *gin.Context) {
 		return
 	}
 
-	// 更新 _host.js 文件，添加新的 brand
-	fileService := services.NewFileService()
-	if err := fileService.UpdateHostFileForBrand(req.Code); err != nil {
-		utils.InternalServerError(c, "Failed to update _host.js: "+err.Error())
-		return
-	}
-
 	utils.Created(c, gin.H{"data": brand}, "品牌创建成功")
 }
 
@@ -118,7 +111,11 @@ func (h *BrandHandler) DeleteBrand(c *gin.Context) {
 
 	err = h.brandService.DeleteBrand(brandID)
 	if err != nil {
-		utils.Conflict(c, err.Error())
+		if err.Error() == "cannot delete brand with existing clients" {
+			utils.Conflict(c, "无法删除品牌：该品牌下还有客户端")
+		} else {
+			utils.InternalServerError(c, "删除品牌失败："+err.Error())
+		}
 		return
 	}
 

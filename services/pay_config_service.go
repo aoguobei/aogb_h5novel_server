@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"brand-config-api/config"
 	"brand-config-api/database"
@@ -123,7 +124,26 @@ func (s *PayConfigService) UpdatePayConfigByClientID(clientID int, payConfig mod
 		} else {
 			// 记录存在，更新记录
 			log.Printf("📝 支付配置记录已存在，更新记录")
-			if err := ctx.DB.Model(&existingPayConfig).Updates(payConfig).Error; err != nil {
+			log.Printf("🔍 更新前的配置: %+v", existingPayConfig)
+			log.Printf("🔍 要更新的配置: %+v", payConfig)
+
+			// 保留原有的 ID 和 created_at，设置其他字段
+			payConfig.ID = existingPayConfig.ID
+			payConfig.ClientID = clientID
+			payConfig.CreatedAt = existingPayConfig.CreatedAt
+			payConfig.UpdatedAt = time.Now()
+
+			// 使用 Select 明确指定要更新的字段，这样可以更新零值（如 false）
+			if err := ctx.DB.Model(&existingPayConfig).Select(
+				"client_id",
+				"normal_pay_enable",
+				"normal_pay_gateway_android",
+				"normal_pay_gateway_ios",
+				"renew_pay_enable",
+				"renew_pay_gateway_android",
+				"renew_pay_gateway_ios",
+				"updated_at",
+			).Updates(&payConfig).Error; err != nil {
 				return fmt.Errorf("failed to update pay config in database: %v", err)
 			}
 			log.Printf("✅ 数据库记录更新成功")

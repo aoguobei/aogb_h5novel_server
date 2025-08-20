@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"time"
 
 	"brand-config-api/config"
 	"brand-config-api/database"
@@ -197,7 +198,31 @@ func (s *CommonConfigService) UpdateCommonConfigByClientID(clientID int, commonC
 		} else {
 			// 记录存在，更新记录
 			log.Printf("📝 通用配置记录已存在，更新记录")
-			if err := ctx.DB.Model(&existingCommonConfig).Updates(commonConfig).Error; err != nil {
+			log.Printf("🔍 更新前的配置: %+v", existingCommonConfig)
+			log.Printf("🔍 要更新的配置: %+v", commonConfig)
+
+			// 保留原有的 ID 和 created_at，设置其他字段
+			commonConfig.ID = existingCommonConfig.ID
+			commonConfig.ClientID = clientID
+			commonConfig.CreatedAt = existingCommonConfig.CreatedAt
+			commonConfig.UpdatedAt = time.Now()
+
+			// 使用 Select 明确指定要更新的字段，这样可以更新零值（如 false）
+			if err := ctx.DB.Model(&existingCommonConfig).Select(
+				"client_id",
+				"deliver_business_id_enable",
+				"deliver_business_id",
+				"deliver_switch_id_enable",
+				"deliver_switch_id",
+				"protocol_company",
+				"protocol_about",
+				"protocol_privacy",
+				"protocol_vod",
+				"protocol_user_cancel",
+				"contact_url",
+				"script_base",
+				"updated_at",
+			).Updates(&commonConfig).Error; err != nil {
 				return fmt.Errorf("failed to update common config in database: %v", err)
 			}
 			log.Printf("✅ 数据库记录更新成功")

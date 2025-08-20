@@ -409,7 +409,7 @@ func (s *FileService) updatePackageJSONFile(brandCode, host string, appName stri
 }
 
 // UpdateHostFileForBrand 更新 _host.js 文件，添加新的 brand
-func (s *FileService) UpdateHostFileForBrand(brandCode string) error {
+func (s *FileService) UpdateHostFileForBrand(brandCode string, fileManager *rollback.FileRollback) error {
 	fmt.Printf("🔄 Starting updateHostFileForBrand for brand: %s\n", brandCode)
 
 	hostFilePath := s.config.File.HostFile
@@ -427,6 +427,11 @@ func (s *FileService) UpdateHostFileForBrand(brandCode string) error {
 	if strings.Contains(contentStr, brandPattern) {
 		fmt.Printf("Brand %s already exists in _host.js\n", brandCode)
 		return nil
+	}
+
+	// 备份文件
+	if err := fileManager.Backup(hostFilePath, ""); err != nil {
+		return fmt.Errorf("failed to backup _host.js: %v", err)
 	}
 
 	// 在 getBrand_ 函数中添加新的 brand
