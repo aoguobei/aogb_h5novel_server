@@ -58,11 +58,11 @@ type CommonConfigRequest struct {
 
 type PayConfigRequest struct {
 	NormalPayEnable         bool `json:"normal_pay_enable"`
-	NormalPayGatewayAndroid *int `json:"normal_pay_gateway_android"`
-	NormalPayGatewayIOS     *int `json:"normal_pay_gateway_ios"`
+	NormalPayGatewayAndroid int  `json:"normal_pay_gateway_android"`
+	NormalPayGatewayIOS     int  `json:"normal_pay_gateway_ios"`
 	RenewPayEnable          bool `json:"renew_pay_enable"`
-	RenewPayGatewayAndroid  *int `json:"renew_pay_gateway_android"`
-	RenewPayGatewayIOS      *int `json:"renew_pay_gateway_ios"`
+	RenewPayGatewayAndroid  int  `json:"renew_pay_gateway_android"`
+	RenewPayGatewayIOS      int  `json:"renew_pay_gateway_ios"`
 }
 
 type UIConfigRequest struct {
@@ -376,18 +376,18 @@ func (s *WebsiteService) validateRequest(req *CreateWebsiteRequest) error {
 
 	// 3. 验证支付网关ID（业务逻辑验证）
 	if req.PayConfig.NormalPayEnable {
-		if req.PayConfig.NormalPayGatewayAndroid == nil || *req.PayConfig.NormalPayGatewayAndroid <= 0 {
+		if req.PayConfig.NormalPayGatewayAndroid <= 0 {
 			return fmt.Errorf("normal_pay_gateway_android must be greater than 0 when normal_pay_enable is true")
 		}
-		if req.PayConfig.NormalPayGatewayIOS == nil || *req.PayConfig.NormalPayGatewayIOS <= 0 {
+		if req.PayConfig.NormalPayGatewayIOS <= 0 {
 			return fmt.Errorf("normal_pay_gateway_ios must be greater than 0 when normal_pay_enable is true")
 		}
 	}
 	if req.PayConfig.RenewPayEnable {
-		if req.PayConfig.RenewPayGatewayAndroid == nil || *req.PayConfig.RenewPayGatewayAndroid <= 0 {
+		if req.PayConfig.RenewPayGatewayAndroid <= 0 {
 			return fmt.Errorf("renew_pay_gateway_android must be greater than 0 when renew_pay_enable is true")
 		}
-		if req.PayConfig.RenewPayGatewayIOS == nil || *req.PayConfig.RenewPayGatewayIOS <= 0 {
+		if req.PayConfig.RenewPayGatewayIOS <= 0 {
 			return fmt.Errorf("renew_pay_gateway_ios must be greater than 0 when renew_pay_enable is true")
 		}
 	}

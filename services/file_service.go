@@ -626,7 +626,7 @@ func (s *FileService) removePackageJSONEntries(brandCode, host string, fileManag
 	platformKey := fmt.Sprintf("%s-%s", host, brandCode)
 
 	// 检查是否存在该配置
-	if !strings.Contains(contentStr, fmt.Sprintf(`"dev:%s"`, platformKey)) {
+	if !strings.Contains(contentStr, platformKey) {
 		log.Printf("⚠️ package.json中不存在配置: %s", platformKey)
 		return nil
 	}
@@ -640,35 +640,36 @@ func (s *FileService) removePackageJSONEntries(brandCode, host string, fileManag
 	lines := strings.Split(contentStr, "\n")
 	var newLines []string
 	skipMode := false
-	titleFound := false
+	braceCount := 0
+	inConfigBlock := false
 
 	for _, line := range lines {
+
 		// 检查是否进入删除模式 - 找到配置块开始
 		if strings.Contains(line, fmt.Sprintf(`"%s": {`, platformKey)) {
 			skipMode = true
-			titleFound = false
-			log.Printf("🗑️ 开始删除uni-app.scripts配置块: %s", platformKey)
+			braceCount = 1
+			inConfigBlock = true
+			log.Printf("🗑️ 开始删除配置块: %s", platformKey)
 			continue
 		}
 
 		// 如果在删除模式中
 		if skipMode {
-			// 检查是否找到 title: 字段
-			if strings.Contains(line, `"title":`) {
-				titleFound = true
-				log.Printf("🗑️ 找到title字段，继续删除")
-				continue
+			// 计算大括号数量
+			for _, char := range line {
+				if char == '{' {
+					braceCount++
+				} else if char == '}' {
+					braceCount--
+				}
 			}
 
-			// 如果已经找到title，继续删除直到遇到结束的大括号和逗号
-			if titleFound {
-				// 检查是否遇到结束的大括号和逗号（如 }, 或 }）
-				if strings.Contains(strings.TrimSpace(line), "}") && (strings.Contains(line, ",") || strings.TrimSpace(line) == "}") {
-					log.Printf("🗑️ 找到配置块结束，完成删除: %s", platformKey)
-					skipMode = false
-					continue
-				}
-				// 继续删除当前行
+			// 如果大括号数量归零，说明配置块结束
+			if braceCount == 0 {
+				log.Printf("🗑️ 配置块结束，完成删除: %s", platformKey)
+				skipMode = false
+				inConfigBlock = false
 				continue
 			}
 
@@ -676,9 +677,11 @@ func (s *FileService) removePackageJSONEntries(brandCode, host string, fileManag
 			continue
 		}
 
-		// 检查是否包含该平台标识的行（scripts部分）
-		if strings.Contains(line, platformKey) {
-			log.Printf("🗑️ 删除package.json行: %s", strings.TrimSpace(line))
+		// 检查是否包含该平台标识的其他行（如scripts中的引用）
+		// 专门处理scripts中的dev:和build:行
+		if !inConfigBlock && (strings.Contains(line, fmt.Sprintf(`"dev:%s"`, platformKey)) ||
+			strings.Contains(line, fmt.Sprintf(`"build:%s"`, platformKey))) {
+			log.Printf("🗑️ 删除package.json scripts行: %s", strings.TrimSpace(line))
 			continue
 		}
 

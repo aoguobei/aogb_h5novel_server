@@ -57,10 +57,10 @@ type CommonConfig struct {
 type PayConfig struct {
 	ID                      int       `json:"id" gorm:"primaryKey"`
 	ClientID                int       `json:"client_id" gorm:"not null;uniqueIndex"` // 关联的客户端ID，唯一约束
-	NormalPayEnable         bool      `json:"normal_pay_enable" gorm:"default:true"`
+	NormalPayEnable         bool      `json:"normal_pay_enable" gorm:"default:false"`
 	NormalPayGatewayAndroid *int      `json:"normal_pay_gateway_android"`
 	NormalPayGatewayIOS     *int      `json:"normal_pay_gateway_ios"`
-	RenewPayEnable          bool      `json:"renew_pay_enable" gorm:"default:true"`
+	RenewPayEnable          bool      `json:"renew_pay_enable" gorm:"default:false"`
 	RenewPayGatewayAndroid  *int      `json:"renew_pay_gateway_android"`
 	RenewPayGatewayIOS      *int      `json:"renew_pay_gateway_ios"`
 	CreatedAt               time.Time `json:"created_at"`

@@ -59,7 +59,21 @@ func (s *CommonConfigService) CreateCommonConfigWithFile(ctx *rollback.Transacti
 		ScriptBase:              commonConfigReq.ScriptBase,
 	}
 
-	if err := ctx.DB.Create(commonConfig).Error; err != nil {
+	// 使用 Select 明确指定要创建的字段，确保零值（如 false）被正确处理
+	if err := ctx.DB.Select(
+		"client_id",
+		"deliver_business_id_enable",
+		"deliver_business_id",
+		"deliver_switch_id_enable",
+		"deliver_switch_id",
+		"protocol_company",
+		"protocol_about",
+		"protocol_privacy",
+		"protocol_vod",
+		"protocol_user_cancel",
+		"contact_url",
+		"script_base",
+	).Create(commonConfig).Error; err != nil {
 		return nil, fmt.Errorf("failed to create common config in database: %v", err)
 	}
 
@@ -188,7 +202,21 @@ func (s *CommonConfigService) UpdateCommonConfigByClientID(clientID int, commonC
 				// 记录不存在，创建新记录
 				log.Printf("📝 通用配置记录不存在，创建新记录")
 				commonConfig.ClientID = clientID
-				if err := ctx.DB.Create(&commonConfig).Error; err != nil {
+				// 使用 Select 明确指定要创建的字段，确保零值（如 false）被正确处理
+				if err := ctx.DB.Select(
+					"client_id",
+					"deliver_business_id_enable",
+					"deliver_business_id",
+					"deliver_switch_id_enable",
+					"deliver_switch_id",
+					"protocol_company",
+					"protocol_about",
+					"protocol_privacy",
+					"protocol_vod",
+					"protocol_user_cancel",
+					"contact_url",
+					"script_base",
+				).Create(&commonConfig).Error; err != nil {
 					return fmt.Errorf("failed to create common config in database: %v", err)
 				}
 				log.Printf("✅ 数据库记录创建成功")

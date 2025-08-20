@@ -48,14 +48,23 @@ func (s *PayConfigService) CreatePayConfigWithFile(ctx *rollback.TransactionCont
 	payConfig := &models.PayConfig{
 		ClientID:                clientID,
 		NormalPayEnable:         payConfigReq.NormalPayEnable,
-		NormalPayGatewayAndroid: payConfigReq.NormalPayGatewayAndroid,
-		NormalPayGatewayIOS:     payConfigReq.NormalPayGatewayIOS,
+		NormalPayGatewayAndroid: &payConfigReq.NormalPayGatewayAndroid,
+		NormalPayGatewayIOS:     &payConfigReq.NormalPayGatewayIOS,
 		RenewPayEnable:          payConfigReq.RenewPayEnable,
-		RenewPayGatewayAndroid:  payConfigReq.RenewPayGatewayAndroid,
-		RenewPayGatewayIOS:      payConfigReq.RenewPayGatewayIOS,
+		RenewPayGatewayAndroid:  &payConfigReq.RenewPayGatewayAndroid,
+		RenewPayGatewayIOS:      &payConfigReq.RenewPayGatewayIOS,
 	}
 
-	if err := ctx.DB.Create(payConfig).Error; err != nil {
+	// 使用 Select 明确指定要创建的字段，确保零值（如 false）被正确处理
+	if err := ctx.DB.Select(
+		"client_id",
+		"normal_pay_enable",
+		"normal_pay_gateway_android",
+		"normal_pay_gateway_ios",
+		"renew_pay_enable",
+		"renew_pay_gateway_android",
+		"renew_pay_gateway_ios",
+	).Create(payConfig).Error; err != nil {
 		return nil, fmt.Errorf("failed to create pay config in database: %v", err)
 	}
 
@@ -114,7 +123,16 @@ func (s *PayConfigService) UpdatePayConfigByClientID(clientID int, payConfig mod
 				// 记录不存在，创建新记录
 				log.Printf("📝 支付配置记录不存在，创建新记录")
 				payConfig.ClientID = clientID
-				if err := ctx.DB.Create(&payConfig).Error; err != nil {
+				// 使用 Select 明确指定要创建的字段，确保零值（如 false）被正确处理
+				if err := ctx.DB.Select(
+					"client_id",
+					"normal_pay_enable",
+					"normal_pay_gateway_android",
+					"normal_pay_gateway_ios",
+					"renew_pay_enable",
+					"renew_pay_gateway_android",
+					"renew_pay_gateway_ios",
+				).Create(&payConfig).Error; err != nil {
 					return fmt.Errorf("failed to create pay config in database: %v", err)
 				}
 				log.Printf("✅ 数据库记录创建成功")
