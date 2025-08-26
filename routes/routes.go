@@ -132,5 +132,8 @@ func SetupRoutes() *gin.Engine {
 	// 设置邮件路由
 	SetupEmailRoutes(r)
 
+	// 设置Git操作路由
+	SetupGitRoutes(r)
+
 	return r
 }

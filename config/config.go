@@ -6,9 +6,10 @@ import (
 
 // Config 应用配置结构
 type Config struct {
-	Database DatabaseConfig
-	Server   ServerConfig
-	File     FileConfig
+	Database    DatabaseConfig
+	Server      ServerConfig
+	File        FileConfig
+	GitReposDir string // Git仓库目录
 }
 
 // DatabaseConfig 数据库配置
@@ -48,6 +49,7 @@ type FileConfig struct {
 // Load 加载配置
 func Load() *Config {
 	basePath := getEnv("BASE_PATH", "C:/F_explorer/h5projects/jianruiH5/novel_h5config")
+	// 	basePath := getEnv("BASE_PATH", "/opt/novel_h5_webconfig/funNovel_edit")
 
 	return &Config{
 		Database: DatabaseConfig{
@@ -55,6 +57,7 @@ func Load() *Config {
 			Port:     getEnv("DB_PORT", "3306"),
 			User:     getEnv("DB_USER", "root"),
 			Password: getEnv("DB_PASSWORD", "aoguobei-otzf"),
+			// 			Password: getEnv("DB_PASSWORD", "Nihao123!"),
 			Name:     getEnv("DB_NAME", "h5novel_config"),
 		},
 		Server: ServerConfig{
@@ -78,6 +81,7 @@ func Load() *Config {
 			UIConfigsDir:     filepath.Join(basePath, "funNovel/src/appConfig/uiConfigs"),
 			LocalConfigsDir:  filepath.Join(basePath, "funNovel/src/appConfig/localConfigs"),
 		},
+		GitReposDir: "C:/F_explorer/h5projects/jianruiH5/somalia_funNovel",
 	}
 }
 
