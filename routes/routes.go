@@ -135,5 +135,8 @@ func SetupRoutes() *gin.Engine {
 	// 设置Git操作路由
 	SetupGitRoutes(r)
 
+	// 设置部署路由
+	SetupDeployRoutes(r)
+
 	return r
 }
