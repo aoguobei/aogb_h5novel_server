@@ -81,3 +81,10 @@ __debug_bin
 ######################
 .sass-cache/*
 node_modules/
+
+# 自定义 #
+######################
+deploy.sh
+novel-h5-backend-linux
+start_backend.sh
+!database.zip
